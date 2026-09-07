@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# Secrets and local settings
+.env
+backend/.env
+frontend/.env
+
+# Local data and generated artifacts
+outputs/
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/imports/*
+!data/imports/.gitkeep
+data/reports/*
+!data/reports/.gitkeep
+data/reviews/*
+!data/reviews/.gitkeep
+data/visual_references/*
+!data/visual_references/.gitkeep
+
+# IDE / operating system
+.idea/
+.vscode/
+.DS_Store

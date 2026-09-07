@@ -1,0 +1,22 @@
+[
+  {"id":"fact-01","category":"文物事实","priority":"high","query":"凤凰八卦铜镜的年代是什么","expected_artifact":"凤凰八卦铜镜","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应依据标准目录回答年代，并引用目录来源。"},
+  {"id":"fact-02","category":"文物事实","priority":"high","query":"唐崖长官司印主要是什么用途","expected_artifact":"唐崖长官司印","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应定位唐崖长官司印，并依据馆内资料回答用途。"},
+  {"id":"fact-03","category":"文物事实","priority":"high","query":"永宁寺铜钟是什么年代、在哪里发现的","expected_artifact":"永宁寺铜钟","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应回答永宁寺铜钟的目录信息并给出引用。"},
+  {"id":"fact-04","category":"文物事实","priority":"normal","query":"金凤冠是什么材质的文物","expected_artifact":"金凤冠","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应依据目录回答材质，不应自行补充未核验信息。"},
+  {"id":"fact-05","category":"文物事实","priority":"normal","query":"水晶狮在哪里出土","expected_artifact":"水晶狮","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应定位水晶狮并引用目录或关联馆内资料。"},
+  {"id":"fact-06","category":"文物事实","priority":"normal","query":"宣德炉属于什么类型的馆藏文物","expected_artifact":"宣德炉","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应根据馆藏目录回答，不能把常识当成馆藏事实。"},
+  {"id":"fact-07","category":"文物事实","priority":"normal","query":"奉天诰命碑是哪一类文物","expected_artifact":"奉天诰命碑","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应定位奉天诰命碑并提供馆内来源。"},
+  {"id":"fact-08","category":"文物事实","priority":"normal","query":"请介绍一下状元及第镜","expected_artifact":"状元及第镜","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应给出简洁介绍，并引用馆内资料。"},
+  {"id":"fact-09","category":"文物事实","priority":"normal","query":"青花人物瓶有什么基本信息","expected_artifact":"青花人物瓶","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应引用目录或审核通过的馆内资料。"},
+  {"id":"fact-10","category":"背景资料","priority":"high","query":"唐宋背景资料主要讲了什么","expected_artifact":"","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应引用唐宋背景资料，并区分馆内资料与通用拓展。"},
+  {"id":"alias-01","category":"别名口语","priority":"high","query":"凤凰八卦镜是馆里哪件文物","expected_artifact":"凤凰八卦铜镜","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应通过别名定位到凤凰八卦铜镜。"},
+  {"id":"alias-02","category":"别名口语","priority":"normal","query":"永宁寺的钟给我讲讲","expected_artifact":"永宁寺铜钟","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应定位到永宁寺铜钟并引用馆内资料。"},
+  {"id":"alias-03","category":"别名口语","priority":"normal","query":"唐崖土司的官印是哪一件","expected_artifact":"唐崖长官司印","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应定位到唐崖长官司印。"},
+  {"id":"alias-04","category":"描述提问","priority":"normal","query":"一面有凤凰和八卦纹样的明代铜镜是什么","expected_artifact":"凤凰八卦铜镜","minimum_citations":1,"expected_media_type":null,"should_refuse":false,"reference_answer":"应通过描述定位到凤凰八卦铜镜。"},
+  {"id":"media-01","category":"媒体请求","priority":"high","query":"西瓜碑音频","expected_artifact":"西瓜碑","minimum_citations":1,"expected_media_type":"audio","should_refuse":false,"reference_answer":"应返回西瓜碑关联音频，并说明来源。"},
+  {"id":"media-02","category":"媒体请求","priority":"high","query":"建始直立人遗址图片","expected_artifact":"建始直立人遗址","minimum_citations":1,"expected_media_type":"image","should_refuse":false,"reference_answer":"应返回建始直立人遗址关联图片。"},
+  {"id":"media-03","category":"媒体请求","priority":"normal","query":"铜钲视频","expected_artifact":"铜钲","minimum_citations":0,"expected_media_type":"video","should_refuse":false,"reference_answer":"应检查铜钲视频是否存在；如果没有，应明确提示暂无该类型媒体。"},
+  {"id":"refuse-01","category":"资料不足","priority":"high","query":"馆藏里有外星人文物吗","expected_artifact":"","minimum_citations":0,"expected_media_type":null,"should_refuse":true,"reference_answer":"应明确说明本地资料不足，不能编造馆藏事实。"},
+  {"id":"refuse-02","category":"资料不足","priority":"high","query":"西瓜碑的准确市场价格是多少","expected_artifact":"","minimum_citations":0,"expected_media_type":null,"should_refuse":true,"reference_answer":"应说明馆内资料没有市场价格，不能给出确定价格。"},
+  {"id":"refuse-03","category":"资料不足","priority":"high","query":"明天恩施州博物馆几点闭馆","expected_artifact":"","minimum_citations":0,"expected_media_type":null,"should_refuse":true,"reference_answer":"外搜关闭且本地没有实时开放时间时，应明确资料不足。"}
+]

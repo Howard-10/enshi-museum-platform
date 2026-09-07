@@ -1,0 +1,5 @@
+[
+  {"id":"xigua-media","category":"media","priority":"high","query":"西瓜碑音频","expected_artifact":"西瓜碑","minimum_citations":1,"expected_media_type":"audio","should_refuse":false,"reference_answer":"应返回西瓜碑音频。"},
+  {"id":"catalog-mirror","category":"exact_artifact","priority":"high","query":"凤凰八卦铜镜","expected_artifact":"凤凰八卦铜镜","minimum_citations":0,"expected_media_type":null,"should_refuse":false,"reference_answer":"应定位到凤凰八卦铜镜。"},
+  {"id":"tangya-seal","category":"exact_artifact","priority":"high","query":"唐崖长官司印","expected_artifact":"唐崖长官司印","minimum_citations":0,"expected_media_type":null,"should_refuse":false,"reference_answer":"应定位到唐崖长官司印。"}
+]
