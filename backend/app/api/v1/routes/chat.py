@@ -2,16 +2,17 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies import CurrentUser
 from app.core.config import settings
 from app.db.session import get_db_session
 from app.graphs.chat_graph import MEDIA_WORDS, OUT_OF_SCOPE_REQUEST_WORDS, chat_graph
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.schemas.conversation import ConversationHistoryResponse, ConversationMessageRead
 from app.services.answer_generation import generate_grounded_answer
-from app.services.conversation_memory import ConversationMemoryService
+from app.services.conversation_memory import ConversationMemoryService, ConversationOwnershipError
 from app.services.evidence_gate import evidence_gate
 from app.services.rag_pipeline import RagPipeline
 from app.services.web_search import (
@@ -27,8 +28,14 @@ DbSession = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(request: ChatRequest, session: DbSession) -> ChatResponse:
+async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUser) -> ChatResponse:
     """Run intent detection, evidence retrieval, and answer composition."""
+
+    memory = ConversationMemoryService(session)
+    try:
+        await memory.ensure_owner(request.session_id, current_user.id)
+    except ConversationOwnershipError as error:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能访问其他用户的对话。") from error
 
     wants_media = any(word in request.message for word in MEDIA_WORDS)
     requested_media_type = next(
@@ -268,8 +275,9 @@ async def chat(request: ChatRequest, session: DbSession) -> ChatResponse:
         evidence_status=gate["evidence_status"],
         reason_codes=gate["reason_codes"],
     )
-    await ConversationMemoryService(session).remember_exchange(
+    await memory.remember_exchange(
         session_id=request.session_id,
+        user_id=current_user.id,
         user_content=request.message,
         assistant_content=response.answer,
         citations=[citation.model_dump() for citation in response.citations],
@@ -279,10 +287,15 @@ async def chat(request: ChatRequest, session: DbSession) -> ChatResponse:
 
 
 @router.get("/{session_id}/history", response_model=ConversationHistoryResponse)
-async def get_history(session_id: str, session: DbSession) -> ConversationHistoryResponse:
+async def get_history(session_id: str, session: DbSession, current_user: CurrentUser) -> ConversationHistoryResponse:
     """Return recent messages from Redis when warm, otherwise PostgreSQL."""
 
-    source, messages = await ConversationMemoryService(session).recent_messages(session_id)
+    try:
+        source, messages = await ConversationMemoryService(session).recent_messages(
+            session_id, current_user.id
+        )
+    except ConversationOwnershipError as error:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能访问其他用户的对话。") from error
     return ConversationHistoryResponse(
         session_id=session_id,
         source=source,

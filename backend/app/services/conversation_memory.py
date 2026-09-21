@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from redis.asyncio import from_url
 from redis.exceptions import RedisError
@@ -17,6 +18,10 @@ from app.services.answer_generation import clean_user_facing_text
 
 RECENT_MESSAGE_LIMIT = 20
 CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
+
+
+class ConversationOwnershipError(PermissionError):
+    """Raised when a session key belongs to another visitor."""
 
 
 def cache_key(session_id: str) -> str:
@@ -44,12 +49,13 @@ class ConversationMemoryService:
         self,
         *,
         session_id: str,
+        user_id: UUID,
         user_content: str,
         assistant_content: str,
         citations: list[dict[str, Any]],
         media: list[dict[str, Any]],
     ) -> None:
-        conversation = await self._get_or_create_conversation(session_id)
+        conversation = await self._get_or_create_conversation(session_id, user_id)
         current_sequence = await self.session.scalar(
             select(func.max(ConversationMessage.sequence)).where(
                 ConversationMessage.conversation_id == conversation.id
@@ -74,30 +80,43 @@ class ConversationMemoryService:
         await self.session.commit()
         await self.session.refresh(user_message)
         await self.session.refresh(assistant_message)
-        await self._cache_recent(session_id, await self._load_database_recent(session_id))
+        await self._cache_recent(session_id, await self._load_database_recent(session_id, user_id))
 
-    async def recent_messages(self, session_id: str) -> tuple[str, list[dict[str, Any]]]:
+    async def recent_messages(self, session_id: str, user_id: UUID) -> tuple[str, list[dict[str, Any]]]:
+        conversation = await self._conversation_for_user(session_id, user_id)
+        if conversation is None:
+            return "postgresql", []
         cached = await self._load_cached_recent(session_id)
         if cached is not None:
             return "redis", cached
-        messages = await self._load_database_recent(session_id)
+        messages = await self._load_database_recent(session_id, user_id)
         await self._cache_recent(session_id, messages)
         return "postgresql", messages
 
-    async def _get_or_create_conversation(self, session_id: str) -> Conversation:
+    async def ensure_owner(self, session_id: str, user_id: UUID) -> None:
+        await self._get_or_create_conversation(session_id, user_id)
+
+    async def _conversation_for_user(self, session_id: str, user_id: UUID) -> Conversation | None:
         conversation = await self.session.scalar(
             select(Conversation).where(Conversation.session_key == session_id)
         )
+        if conversation is not None and conversation.user_id not in (None, user_id):
+            raise ConversationOwnershipError
+        if conversation is not None and conversation.user_id is None:
+            conversation.user_id = user_id
+            await self.session.flush()
+        return conversation
+
+    async def _get_or_create_conversation(self, session_id: str, user_id: UUID) -> Conversation:
+        conversation = await self._conversation_for_user(session_id, user_id)
         if conversation is None:
-            conversation = Conversation(session_key=session_id)
+            conversation = Conversation(session_key=session_id, user_id=user_id)
             self.session.add(conversation)
             await self.session.flush()
         return conversation
 
-    async def _load_database_recent(self, session_id: str) -> list[dict[str, Any]]:
-        conversation = await self.session.scalar(
-            select(Conversation).where(Conversation.session_key == session_id)
-        )
+    async def _load_database_recent(self, session_id: str, user_id: UUID) -> list[dict[str, Any]]:
+        conversation = await self._conversation_for_user(session_id, user_id)
         if conversation is None:
             return []
         messages = (

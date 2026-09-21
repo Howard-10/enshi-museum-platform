@@ -1,9 +1,10 @@
 from fastapi import APIRouter
 
-from app.api.v1.routes import admin, chat, health, knowledge, media, system, visual_search
+from app.api.v1.routes import admin, auth, chat, health, knowledge, media, system, visual_search
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
+api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(knowledge.router, prefix="/knowledge", tags=["knowledge"])
 api_router.include_router(media.router, prefix="/media", tags=["media"])

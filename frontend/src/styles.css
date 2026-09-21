@@ -45,8 +45,31 @@ body { min-width: 320px; min-height: 100vh; margin: 0; }
 .admin-nav-link { display: block; margin: 0 0 9px; padding: 10px 13px; border: 1px solid #cfdaea; border-radius: 8px; background: #f7faff; color: #2d67c4; font-size: 14px; font-weight: 700; text-decoration: none; }
 .admin-nav-link:hover { border-color: #7ea6e7; background: #edf4ff; color: #1554b3; }
 .guest-chip { width: 144px; margin-bottom: 6px; padding: 12px 10px; border-radius: 9px; background: #929292; color: #e7e7e7; cursor: default; text-align: left; }
+.user-chip { display: grid; gap: 3px; margin: 0 0 8px; padding: 10px 12px; border: 1px solid #dce6f4; border-radius: 9px; background: #f7faff; color: #254675; }
+.user-chip b { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.user-chip span { overflow: hidden; color: #7b8da8; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.logout-button { padding: 3px 0 10px; background: transparent; color: #6c7f9d; cursor: pointer; font-size: 12px; }
+.logout-button:hover { color: #2461fa; }
 .clear-chat { display: block; padding: 16px 13px; background: transparent; color: #63779a; cursor: pointer; font-size: 17px; }
 .clear-chat:hover { color: #2461fa; }
+
+.auth-page { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: radial-gradient(circle at 15% 15%, #e5f7f2, transparent 34%), linear-gradient(135deg, #f8fbff, #eef4fb); }
+.auth-card { width: min(430px, 100%); padding: 40px; border: 1px solid #dbe5f3; border-radius: 18px; background: #fff; box-shadow: 0 20px 55px rgb(21 61 115 / 12%); }
+.auth-card.auth-loading { display: grid; place-items: center; gap: 15px; color: #5e7292; }
+.auth-mark { display: grid; width: 54px; height: 54px; margin-bottom: 18px; place-items: center; border: 2px solid #0c8d8c; color: #0c8d8c; font-family: "SimSun", serif; font-size: 34px; }
+.auth-card .answer-label { margin: 0 0 8px; color: #b17a22; font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+.auth-card h1 { margin: 0; color: #102b57; font-size: 30px; }
+.auth-intro { margin: 10px 0 27px; color: #71839e; font-size: 14px; }
+.auth-card form { display: grid; gap: 16px; }
+.auth-card label { display: grid; gap: 7px; color: #37547d; font-size: 13px; font-weight: 700; }
+.auth-card input { width: 100%; padding: 12px 13px; border: 1px solid #cfdaea; border-radius: 8px; outline: none; color: #1e3c67; font: inherit; font-weight: 400; }
+.auth-card input:focus { border-color: #4c83ed; box-shadow: 0 0 0 3px rgb(76 131 237 / 14%); }
+.auth-submit { padding: 13px; border-radius: 8px; background: #2867e9; color: #fff; cursor: pointer; font-weight: 800; }
+.auth-submit:hover { background: #1c56ce; }
+.auth-submit:disabled { cursor: wait; opacity: .65; }
+.auth-error { margin: -2px 0 0; color: #c44747; font-size: 13px; line-height: 1.5; }
+.auth-switch, .auth-admin-link { display: block; margin: 17px auto 0; background: transparent; color: #356dca; cursor: pointer; font-size: 13px; text-align: center; text-decoration: none; }
+.auth-admin-link { margin-top: 24px; color: #7b8da6; font-size: 12px; }
 
 .chat-stage { min-height: 100vh; margin-left: 217px; padding: 76px 20px 23px; }
 .chat-thread { width: min(776px, 100%); margin: 32px auto 128px; }
@@ -87,6 +110,7 @@ body { min-width: 320px; min-height: 100vh; margin: 0; }
 .home-featured-card-body button { padding: 0; border: 0; background: transparent; color: #2b67ce; cursor: pointer; font: inherit; font-size: 12px; font-weight: 800; }
 
 .answer-panel { max-width: 776px; margin: min(16vh, 145px) auto 0; padding: 35px; border: 1px solid #dce5f4; border-radius: 12px; background: #fff; box-shadow: 0 14px 34px rgb(18 57 112 / 8%); }
+.citation-heading span { color: #8796ab; }
 .conversation-history { width: min(776px, calc(100% - 32px)); margin: 24px auto 20px; border: 1px solid #e1e8f3; border-radius: 12px; background: #f9fbff; overflow: hidden; }
 .conversation-history[open] { padding-bottom: 8px; }
 .conversation-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; cursor: pointer; list-style: none; }

@@ -15,6 +15,7 @@ import type { ArtifactMedia, VisualSearchResponse } from "../api/client";
 import type { ChatResponse, ConversationHistoryResponse, ConversationMessage } from "../types/chat";
 import type { ArtifactCatalogItem, ArtifactCatalogResponse, KnowledgeSeedResponse, PopularArtifactResponse } from "../types/knowledge";
 import type { SystemReadinessResponse } from "../types/system";
+import type { AuthUser } from "../types/auth";
 import { KnowledgeGamePage } from "./KnowledgeGamePage";
 
 type NavigationKey = "chat" | "collection" | "exhibitions" | "favorites" | "history" | "games";
@@ -76,12 +77,13 @@ function readFavoriteIds(): string[] {
   }
 }
 
-function createSessionId() {
+function createSessionId(userId: string) {
+  const storageKey = `${SESSION_STORAGE_KEY}:${userId}`;
   try {
-    const saved = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    const saved = window.localStorage.getItem(storageKey);
     if (saved) return saved;
     const created = `web-${crypto.randomUUID()}`;
-    window.localStorage.setItem(SESSION_STORAGE_KEY, created);
+    window.localStorage.setItem(storageKey, created);
     return created;
   } catch {
     return `web-${crypto.randomUUID()}`;
@@ -422,8 +424,13 @@ function ImageSearchPanel({ response, previewUrl }: { response: VisualSearchResp
   );
 }
 
-export function ChatPage() {
-  const sessionId = useMemo(createSessionId, []);
+interface ChatPageProps {
+  user: AuthUser;
+  onLogout: () => void;
+}
+
+export function ChatPage({ user, onLogout }: ChatPageProps) {
+  const sessionId = useMemo(() => createSessionId(user.id), [user.id]);
   const [activeNavigation, setActiveNavigation] = useState<NavigationKey>("chat");
   const [message, setMessage] = useState("");
   const [result, setResult] = useState<ChatResponse | null>(null);
@@ -588,12 +595,12 @@ export function ChatPage() {
     setError("");
     setResult(null);
     setImageResult(null);
+    setMessage("");
     try {
       const response = await sendChatMessage({ session_id: sessionId, message: cleanText });
       setConversation((turns) => [...turns, { id: crypto.randomUUID(), question: cleanText, response }]);
       setResult(response);
       setHistory(null);
-      setMessage("");
       setActiveNavigation("chat");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "请求失败，请稍后再试。");
@@ -923,7 +930,7 @@ export function ChatPage() {
           )}
           {result.citations.length > 0 && (
             <div className="citation-row">
-              <div className="citation-heading"><b>{result.citations.length} 项可追溯来源</b><span>点击查看资料依据</span></div>
+              <div className="citation-heading"><b>{result.citations.length} 项可追溯来源</b><span>{result.evidence_status === "sufficient" ? "点击查看资料依据" : "以下是检索线索，不代表证据已经足够"}</span></div>
               <ul className="citation-list">
                 {result.citations.map((citation) => (
                   <li key={citation.id}>
@@ -991,7 +998,7 @@ export function ChatPage() {
   return (
     <div className="museum-shell">
       <header className="topbar"><div className="brand-mark" aria-label="恩施州博物馆">恩</div><div className="museum-name"><strong>恩施州博物馆</strong><span>ENSHI PREFECTURE MUSEUM</span></div><div className="topbar-divider" /><h1>智能导览问答</h1></header>
-      <aside className="sidebar" aria-label="主导航"><nav>{navigation.map((item) => <button className={`nav-item ${activeNavigation === item.key ? "active" : ""}`} key={item.key} type="button" onClick={() => void selectNavigation(item.key)}><span aria-hidden="true">{item.icon}</span>{item.label}</button>)}</nav><div className="sidebar-bottom"><a className="admin-nav-link" href="/admin">⚙ 管理端</a><button className="guest-chip" type="button" title="登录功能将在权限模块完成后接入">◌ 访客演示模式</button><button className="clear-chat" type="button" onClick={() => { setResult(null); setConversation([]); }}>⌫ 清空对话</button></div></aside>
+      <aside className="sidebar" aria-label="主导航"><nav>{navigation.map((item) => <button className={`nav-item ${activeNavigation === item.key ? "active" : ""}`} key={item.key} type="button" onClick={() => void selectNavigation(item.key)}><span aria-hidden="true">{item.icon}</span>{item.label}</button>)}</nav><div className="sidebar-bottom"><a className="admin-nav-link" href="/admin">⚙ 管理端</a><div className="user-chip"><b>{user.display_name}</b><span>{user.email}</span></div><button className="logout-button" type="button" onClick={onLogout}>退出登录</button><button className="clear-chat" type="button" onClick={() => { setResult(null); setConversation([]); }}>⌫ 清空对话</button></div></aside>
       <main className="chat-stage">
         {renderMainContent()}
         {activeNavigation === "chat" && <button className="mobile-search-launch" type="button" onClick={() => void selectNavigation("collection")}>⌕ 搜索馆藏</button>}

@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     # Local MVP protection for the separate management console. Replace with
     # school SSO/local user authentication before production deployment.
     admin_api_token: str | None = None
+    # Used to sign visitor access tokens. Set a long random value in .env.
+    auth_secret: str = "change_me_auth_secret"
     llm_api_key: str | None = None
     llm_base_url: str | None = None
     chat_model: str | None = None

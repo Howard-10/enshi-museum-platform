@@ -2,17 +2,24 @@ import type { ChatRequest, ChatResponse, ConversationHistoryResponse } from "../
 import type { ArtifactCatalogResponse, KnowledgeSeedResponse, PopularArtifactResponse } from "../types/knowledge";
 import type { SystemReadinessResponse } from "../types/system";
 import type { Citation, MediaItem } from "../types/chat";
+import { getAuthToken } from "../auth/session";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
+
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export async function sendChatMessage(payload: ChatRequest): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
+    if (response.status === 401) throw new Error("登录已失效，请重新登录。");
     throw new Error("后端暂时无法响应，请检查服务是否已启动。");
   }
 
@@ -59,8 +66,9 @@ export async function recognizeArtifactImage(file: File): Promise<VisualSearchRe
 }
 
 export async function getConversationHistory(sessionId: string): Promise<ConversationHistoryResponse> {
-  const response = await fetch(`${API_BASE_URL}/chat/${encodeURIComponent(sessionId)}/history`);
+  const response = await fetch(`${API_BASE_URL}/chat/${encodeURIComponent(sessionId)}/history`, { headers: authHeaders() });
   if (!response.ok) {
+    if (response.status === 401) throw new Error("登录已失效，请重新登录。");
     throw new Error("暂时无法读取对话记录，请检查后端服务。");
   }
   return response.json() as Promise<ConversationHistoryResponse>;
