@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from uuid import UUID
 
+from openai import APIError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +46,7 @@ def deterministic_rerank(
             -(
                 fusion_scores.get(item["chunk_id"], 0.0) * 10_000
                 + score_text(item["excerpt"], terms)
+                + score_text(" ".join(item.get("section_path", [])), terms) * 3
             ),
             item["title"],
         ),
@@ -124,7 +126,7 @@ class RagPipeline:
             try:
                 vector_documents = await vector_search(self.session, query, limit=20)
                 rankings["vector"] = [item["chunk_id"] for item in vector_documents]
-            except (RuntimeError, ValueError, OSError) as error:
+            except (APIError, RuntimeError, ValueError, OSError) as error:
                 # A vector outage is a retrieval degradation, not a visitor-facing failure.
                 vector_error = type(error).__name__
         fusion_scores = reciprocal_rank_fusion(rankings)
@@ -145,6 +147,8 @@ class RagPipeline:
                 "title": item["title"],
                 "url": None,
                 "excerpt": item["excerpt"],
+                "section_path": item.get("section_path", []),
+                "source_filename": item.get("source_filename"),
             }
             for item in documents
         ]
@@ -233,14 +237,19 @@ class RagPipeline:
         source = {str(chunk.id): (chunk, document) for chunk, document in rows}
         selected: list[dict[str, Any]] = []
         seen_parents: set[str] = set()
+        seen_sections: set[tuple[str, str]] = set()
         for match in ranked_children:
             chunk, document = source.get(match["chunk_id"], (None, None))
             if chunk is None or document is None:
                 continue
             parent_key = str(chunk.parent_chunk_id or chunk.id)
-            if parent_key in seen_parents:
+            section_path = tuple(str(item) for item in (chunk.metadata_json or {}).get("heading_path", []))
+            section_key = (str(document.id), " > ".join(section_path))
+            if parent_key in seen_parents or (section_path and section_key in seen_sections):
                 continue
             seen_parents.add(parent_key)
+            if section_path:
+                seen_sections.add(section_key)
             selected.append({**match, "parent_chunk_id": parent_key})
             if len(selected) == 5:
                 break

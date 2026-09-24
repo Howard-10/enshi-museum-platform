@@ -37,6 +37,7 @@ def serialize_message(message: ConversationMessage) -> dict[str, Any]:
         "content": clean_user_facing_text(message.content) or "",
         "citations": message.citations_json,
         "media": message.media_json,
+        "metadata": message.metadata_json,
         "created_at": created_at.isoformat(),
     }
 
@@ -54,6 +55,7 @@ class ConversationMemoryService:
         assistant_content: str,
         citations: list[dict[str, Any]],
         media: list[dict[str, Any]],
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         conversation = await self._get_or_create_conversation(session_id, user_id)
         current_sequence = await self.session.scalar(
@@ -75,6 +77,7 @@ class ConversationMemoryService:
             content=assistant_content,
             citations_json=citations,
             media_json=media,
+            metadata_json=metadata or {},
         )
         self.session.add_all((user_message, assistant_message))
         await self.session.commit()

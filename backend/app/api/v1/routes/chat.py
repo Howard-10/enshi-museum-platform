@@ -14,6 +14,7 @@ from app.schemas.conversation import ConversationHistoryResponse, ConversationMe
 from app.services.answer_generation import generate_grounded_answer
 from app.services.conversation_memory import ConversationMemoryService, ConversationOwnershipError
 from app.services.evidence_gate import evidence_gate
+from app.services.query_rewriter import rewrite_query
 from app.services.rag_pipeline import RagPipeline
 from app.services.web_search import (
     WebSearchDisabledError,
@@ -27,6 +28,26 @@ router = APIRouter()
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
 
 
+def _deduplicate_citations(citations: list[dict]) -> list[dict]:
+    """Keep one visible citation for identical evidence records."""
+
+    unique: list[dict] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for citation in citations:
+        key = (
+            str(citation.get("source_type") or "internal"),
+            str(citation.get("title") or "").strip(),
+            str(citation.get("excerpt") or "").strip(),
+            str(citation.get("url") or "").strip(),
+            " > ".join(str(item) for item in citation.get("section_path", [])),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(citation)
+    return unique
+
+
 @router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUser) -> ChatResponse:
     """Run intent detection, evidence retrieval, and answer composition."""
@@ -37,7 +58,12 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
     except ConversationOwnershipError as error:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能访问其他用户的对话。") from error
 
-    wants_media = any(word in request.message for word in MEDIA_WORDS)
+    _, recent_history = await memory.recent_messages(request.session_id)
+    rewrite_context = recent_history[-6:]
+    conversation_context = recent_history[-10:]
+    rewrite = rewrite_query(request.message, rewrite_context)
+    effective_query = rewrite.standalone_query
+    wants_media = any(word in effective_query for word in MEDIA_WORDS)
     requested_media_type = next(
         (
             media_type
@@ -48,16 +74,18 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
                 ("图片", "image"),
                 ("照片", "image"),
             )
-            if keyword in request.message
+            if keyword in effective_query
         ),
         None,
     )
     retrieval = await RagPipeline(session).search(
-        request.message,
+        effective_query,
         include_media=wants_media,
         media_type=requested_media_type,
     )
-    gate = evidence_gate(request.message, retrieval)
+    gate = evidence_gate(effective_query, retrieval)
+    if rewrite.used_history:
+        gate["reason_codes"] = [*gate["reason_codes"], "conversation_context_used"]
     if gate.get("citation_scope") == "catalog_only":
         retrieval = {**retrieval, "citations": retrieval.get("catalog_citations", [])}
     elif gate.get("citation_scope") == "catalog_with_background":
@@ -79,10 +107,14 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
             **retrieval,
             "citations": [*catalog_citations, *background_citations],
         }
+    retrieval = {
+        **retrieval,
+        "citations": _deduplicate_citations(retrieval.get("citations", [])),
+    }
     result = chat_graph.invoke(
         {
             "session_id": request.session_id,
-            "user_query": request.message,
+            "user_query": effective_query,
             "intent": "",
             "answer": "",
             "citations": retrieval["citations"],
@@ -97,14 +129,14 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
     generated, generation_reason = (None, None)
     external_search_used = False
     external_search_reason: str | None = None
-    relation_question = any(word in request.message for word in ("关系", "三交", "交往", "交流", "交融"))
+    relation_question = any(word in effective_query for word in ("关系", "三交", "交往", "交流", "交融"))
     artifact_names = [
         str(artifact.get("name"))
         for artifact in retrieval.get("artifacts", [])
         if artifact.get("name")
     ]
     compact_query = "".join(
-        character for character in request.message if character.isalnum() or "\u4e00" <= character <= "\u9fff"
+        character for character in effective_query if character.isalnum() or "\u4e00" <= character <= "\u9fff"
     )
     queried_artifact_names = [
         name
@@ -127,17 +159,17 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
     can_use_external_search = (
         (gate["evidence_status"] == "insufficient" or relation_needs_external)
         and not wants_media
-        and not any(word in request.message for word in OUT_OF_SCOPE_REQUEST_WORDS)
+        and not any(word in effective_query for word in OUT_OF_SCOPE_REQUEST_WORDS)
         and settings.web_search_enabled
     )
     if (
         (gate["evidence_status"] == "insufficient" or relation_needs_external)
         and not wants_media
-        and not any(word in request.message for word in OUT_OF_SCOPE_REQUEST_WORDS)
+        and not any(word in effective_query for word in OUT_OF_SCOPE_REQUEST_WORDS)
         and not settings.web_search_enabled
     ):
         external_search_reason = "external_search_unavailable"
-    external_query = request.message if relation_question else f"恩施州博物馆 {request.message}"
+    external_query = effective_query if relation_question else f"恩施州博物馆 {effective_query}"
     if can_use_external_search:
         try:
             request_count = await monthly_request_count(session)
@@ -149,7 +181,7 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
                     external_query,
                     allowed_domains=allowed_domains(settings),
                 )
-                external_citations = [
+                external_citations = _deduplicate_citations([
                     {
                         "source_type": "external",
                         "id": f"SRC_{index:03d}",
@@ -160,7 +192,7 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
                         "chunk_id": None,
                     }
                     for index, item in enumerate(external_response.results, start=1)
-                ]
+                ])
                 await record_search_audit(
                     session,
                     session_id=request.session_id,
@@ -176,15 +208,17 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
                     external_search_used = True
                     external_retrieval = {
                         **retrieval,
-                        "citations": [
+                        "citations": _deduplicate_citations([
                             *[citation for citation in retrieval.get("citations", []) if citation.get("source_type") == "internal"],
                             *external_citations,
-                        ],
+                        ]),
                         "catalog_citations": retrieval.get("catalog_citations", []),
                     }
                     generated, generation_reason = await generate_grounded_answer(
-                        request.message,
+                        effective_query,
                         external_retrieval,
+                        original_query=request.message,
+                        conversation_context=conversation_context,
                     )
                     if generated is not None:
                         result = {
@@ -255,9 +289,14 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
         gate["evidence_status"] == "sufficient"
         and not has_verified_media_result
         and not relation_needs_external
-        and not any(word in request.message for word in OUT_OF_SCOPE_REQUEST_WORDS)
+        and not any(word in effective_query for word in OUT_OF_SCOPE_REQUEST_WORDS)
     ):
-        generated, generation_reason = await generate_grounded_answer(request.message, retrieval)
+        generated, generation_reason = await generate_grounded_answer(
+            effective_query,
+            retrieval,
+            original_query=request.message,
+            conversation_context=conversation_context,
+        )
     if generated is not None and gate["evidence_status"] == "sufficient" and not external_search_used:
         result = {**result, **generated, "notice": "回答基于本轮馆内资料生成，来源可追溯。"}
     elif generation_reason and gate["evidence_status"] == "sufficient":
@@ -269,7 +308,7 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
         intent=result["intent"],
         answer_scope=result["answer_scope"],
         notice=result["notice"],
-        citations=result["citations"],
+        citations=_deduplicate_citations(result["citations"]),
         media=result["media"],
         unverified_extension=result.get("unverified_extension"),
         evidence_status=gate["evidence_status"],
@@ -282,6 +321,14 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
         assistant_content=response.answer,
         citations=[citation.model_dump() for citation in response.citations],
         media=[media.model_dump() for media in response.media],
+        metadata={
+            "original_query": request.message,
+            "retrieval_query": effective_query,
+            "rewrite_used_history": rewrite.used_history,
+            "rewrite_subject": rewrite.subject,
+            "retrieval_mode": retrieval.get("mode"),
+            "retrieval_trace": retrieval.get("retrieval_trace", {}),
+        },
     )
     return response
 

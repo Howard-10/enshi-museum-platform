@@ -11,6 +11,7 @@ from app.core.config import Settings, settings
 from app.services.citation_validator import CitationValidator
 from app.services.model_clients import create_chat_client
 from app.services.model_readiness import get_model_readiness
+from app.services.query_rewriter import format_conversation_context
 
 
 class GeneratedAnswer(BaseModel):
@@ -86,6 +87,9 @@ async def generate_grounded_answer(
     query: str,
     retrieval: dict[str, Any],
     *,
+    original_query: str | None = None,
+    conversation_context: list[dict[str, Any]] | None = None,
+    conversation_summary: str | None = None,
     config: Settings = settings,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Generate only when enabled; invalid output is discarded as a whole."""
@@ -148,6 +152,15 @@ async def generate_grounded_answer(
         if has_external_source
         else ""
     )
+    formatted_context = format_conversation_context(conversation_context)
+    context_block = (
+        "CONVERSATION_CONTEXT:\n"
+        "以下是本次会话最近的消息，仅用于理解‘它/刚才/这件文物’等上下文，不是事实证据；"
+        "不得把其中未出现在馆内或公开证据中的内容当作事实，也不要为上下文消息添加引用。\n"
+        f"{formatted_context or '（无）'}"
+    )
+    if conversation_summary:
+        context_block += f"\nCONVERSATION_SUMMARY（仅供消解上下文，不是事实证据）：\n{conversation_summary[:2000]}"
     prompt = (
         "你是面向普通游客的博物馆讲解员。只能依据给定证据写 internal_answer，"
         "不得新增、修改或猜测馆藏事实。可选 unverified_extension 只能写通用历史常识，"
@@ -161,7 +174,9 @@ async def generate_grounded_answer(
         "不要罗列检索到的、但与本件无关的其他文物、展览板块或历史事件。"
         "整段控制在三段以内，避免重复同一结论。"
         f"{catalog_instruction}{catalog_only_text}{relation_instruction}{external_instruction}\n\n"
-        f"USER_QUERY:\n{query}\n\nINTERNAL_EVIDENCE:\n{sources}"
+        f"{context_block}\n\n"
+        f"ORIGINAL_USER_QUERY:\n{original_query or query}\n\n"
+        f"RETRIEVAL_QUERY:\n{query}\n\nINTERNAL_EVIDENCE:\n{sources}"
     )
     try:
         structured = create_chat_client(config).with_structured_output(GeneratedAnswer)

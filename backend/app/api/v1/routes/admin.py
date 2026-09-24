@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-import docx2txt
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, or_, select
@@ -44,7 +43,7 @@ from app.schemas.admin import (
     AdminMediaRead,
     AdminSummary,
 )
-from app.services.document_chunker import ParentChildChunker, normalize_text
+from app.services.document_chunker import ParentChildChunker, blocks_to_text, parse_docx_blocks
 from app.services.media_ingestion import MEDIA_DETAILS, build_object_key
 from app.services.minio_storage import MinioStorage
 
@@ -356,7 +355,8 @@ async def upload_admin_document(
     with tempfile.TemporaryDirectory(prefix="enshi-admin-doc-") as temp_dir:
         source_path = Path(temp_dir) / Path(filename).name
         source_path.write_bytes(data)
-        text = normalize_text(docx2txt.process(str(source_path)) or "")
+        blocks = parse_docx_blocks(source_path)
+        text = blocks_to_text(blocks)
         if not text:
             raise HTTPException(status_code=400, detail="文档没有可读取的正文")
         try:
@@ -365,6 +365,7 @@ async def upload_admin_document(
                 text=text,
                 artifact_name=artifact_name,
                 chunker=ParentChildChunker(),
+                blocks=blocks,
             )
         except DuplicateDocumentError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error

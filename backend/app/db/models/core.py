@@ -349,6 +349,7 @@ class ConversationMessage(TimestampMixin, Base):
     content: Mapped[str] = mapped_column(Text)
     citations_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     media_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 

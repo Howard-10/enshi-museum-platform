@@ -11,12 +11,16 @@ export interface Citation {
   title: string;
   url?: string | null;
   excerpt?: string | null;
+  section_path?: string[];
+  source_filename?: string | null;
 }
 
 export interface MediaItem {
   id: string;
   type: "image" | "video" | "audio" | string;
   url: string;
+  filename?: string | null;
+  match_reason?: string | null;
 }
 
 export interface ChatResponse {

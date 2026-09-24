@@ -6,11 +6,12 @@ Example:
 
 import argparse
 import asyncio
+import hashlib
 from pathlib import Path
 
 from app.db.session import SessionLocal
 from app.repositories.document_repository import DocumentRepository, DuplicateDocumentError
-from app.services.document_chunker import ParentChildChunker, normalize_text
+from app.services.document_chunker import ParentChildChunker, blocks_to_text, parse_docx_blocks
 
 
 def find_docx_files(source: Path) -> list[Path]:
@@ -33,22 +34,24 @@ def infer_artifact_name(path: Path, knowledge_root: Path) -> str | None:
     return None
 
 
-async def import_file(path: Path, artifact_name: str | None) -> None:
-    import docx2txt
-
-    text = normalize_text(docx2txt.process(str(path)) or "")
+async def import_file(path: Path, artifact_name: str | None, *, replace_existing: bool = False) -> None:
+    blocks = parse_docx_blocks(path)
+    text = blocks_to_text(blocks)
     if not text:
         print(f"[skip] 未提取到文本：{path}")
         return
 
     async with SessionLocal() as session:
         repository = DocumentRepository(session)
+        if replace_existing:
+            await repository.remove_existing_by_sha256(hashlib.sha256(path.read_bytes()).hexdigest())
         try:
             document = await repository.import_word_text(
                 source_path=path,
                 text=text,
                 artifact_name=artifact_name,
                 chunker=ParentChildChunker(),
+                blocks=blocks,
             )
         except DuplicateDocumentError as error:
             print(f"[skip] {error}")
@@ -65,6 +68,11 @@ async def main() -> None:
         action="store_true",
         help="按“时期/文物/文字/文件.docx”目录结构自动关联文物",
     )
+    parser.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help="显式删除同 SHA-256 的旧分块并用标题感知解析重新导入",
+    )
     args = parser.parse_args()
 
     files = find_docx_files(args.source)
@@ -75,7 +83,7 @@ async def main() -> None:
         artifact_name = args.artifact
         if args.infer_artifact_from_path:
             artifact_name = infer_artifact_name(path, args.source.resolve())
-        await import_file(path, artifact_name)
+        await import_file(path, artifact_name, replace_existing=args.replace_existing)
 
 
 if __name__ == "__main__":

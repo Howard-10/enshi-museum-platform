@@ -14,6 +14,7 @@ class ConversationMessageRead(BaseModel):
     content: str
     citations: list[dict[str, Any]] = Field(default_factory=list)
     media: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 

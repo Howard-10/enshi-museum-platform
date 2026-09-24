@@ -65,6 +65,9 @@ async def vector_search(
                 "parent_chunk_id": str(chunk.parent_chunk_id) if chunk.parent_chunk_id else None,
                 "title": document.title,
                 "excerpt": excerpt_for(chunk.content, terms),
+                "section_path": (chunk.metadata_json or {}).get("heading_path", []),
+                "block_type": (chunk.metadata_json or {}).get("block_type", "paragraph"),
+                "source_filename": (chunk.metadata_json or {}).get("source_filename"),
                 "score": 1.0 - float(row["distance"]),
                 "vector_distance": float(row["distance"]),
             }

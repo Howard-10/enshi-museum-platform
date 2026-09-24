@@ -12,4 +12,14 @@ def test_excerpt_centers_on_the_first_matching_term() -> None:
     excerpt = excerpt_for("前言" * 40 + "西瓜碑是重要文物。" + "后记" * 40, ["西瓜碑"])
 
     assert "西瓜碑是重要文物" in excerpt
-    assert excerpt.startswith("…")
+    assert not excerpt.startswith("…")
+    assert not excerpt.endswith("…")
+
+
+def test_excerpt_can_be_bounded_only_when_requested() -> None:
+    source = "前言" * 40 + "西瓜碑是重要文物。" + "后记" * 40
+
+    excerpt = excerpt_for(source, ["西瓜碑"], max_length=40)
+
+    assert len(excerpt) <= 40
+    assert "…" not in excerpt

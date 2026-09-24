@@ -12,7 +12,7 @@ import {
   sendChatMessage,
 } from "../api/client";
 import type { ArtifactMedia, VisualSearchResponse } from "../api/client";
-import type { ChatResponse, ConversationHistoryResponse, ConversationMessage } from "../types/chat";
+import type { ChatResponse, Citation, ConversationHistoryResponse, ConversationMessage } from "../types/chat";
 import type { ArtifactCatalogItem, ArtifactCatalogResponse, KnowledgeSeedResponse, PopularArtifactResponse } from "../types/knowledge";
 import type { SystemReadinessResponse } from "../types/system";
 import type { AuthUser } from "../types/auth";
@@ -155,6 +155,17 @@ function reasonCodeLabel(code: string) {
 function mediaTypeLabel(type: string) {
   const labels: Record<string, string> = { image: "图片", audio: "音频", video: "视频" };
   return labels[type] ?? "媒体";
+}
+
+function groupCitations(citations: Citation[]) {
+  const groups = new Map<string, Citation[]>();
+  for (const citation of citations) {
+    const key = `${citation.source_type}:${citation.title}`;
+    const current = groups.get(key) || [];
+    current.push(citation);
+    groups.set(key, current);
+  }
+  return [...groups.entries()].map(([key, items]) => ({ key, items }));
 }
 
 function visitLabel(count: number) {
@@ -604,6 +615,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
       setActiveNavigation("chat");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "请求失败，请稍后再试。");
+      setMessage((currentMessage) => currentMessage.trim() ? currentMessage : cleanText);
     } finally {
       setIsSubmitting(false);
     }
@@ -886,6 +898,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 
     if (result) {
       const currentTurn = conversation[conversation.length - 1];
+      const citationGroups = groupCitations(result.citations);
       return (
         <section className="chat-thread" aria-label="当前对话">
           {conversation.length > 1 && (
@@ -932,11 +945,16 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
             <div className="citation-row">
               <div className="citation-heading"><b>{result.citations.length} 项可追溯来源</b><span>{result.evidence_status === "sufficient" ? "点击查看资料依据" : "以下是检索线索，不代表证据已经足够"}</span></div>
               <ul className="citation-list">
-                {result.citations.map((citation) => (
-                  <li key={citation.id}>
-                    <details>
-                      <summary><b>{citation.source_type === "internal" ? "馆内资料" : "外部资料"}</b>：{citation.url ? <a href={citation.url} target="_blank" rel="noreferrer">{citation.title}</a> : citation.title}</summary>
-                      {citation.excerpt && <small>{citation.excerpt}</small>}
+                {citationGroups.map((group) => (
+                  <li key={group.key}>
+                    <details open>
+                      <summary><b>{group.items[0].source_type === "internal" ? "馆内资料" : "外部资料"}</b>：{group.items[0].url ? <a href={group.items[0].url} target="_blank" rel="noreferrer">{group.items[0].title}</a> : group.items[0].title}<span className="citation-group-count">{group.items.length} 个章节</span></summary>
+                      <div className="citation-group-items">
+                        {group.items.map((citation) => <div className="citation-evidence" key={citation.id}>
+                          {citation.section_path?.length ? <small className="citation-path">章节：{citation.section_path.join(" > ")}</small> : null}
+                          {citation.excerpt && <small>{citation.excerpt}</small>}
+                        </div>)}
+                      </div>
                     </details>
                   </li>
                 ))}
@@ -955,7 +973,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
               <div className="media-grid">
                 {result.media.map((item) => (
                   <article className="media-card" key={item.id}>
-                    <div className="media-card-heading"><span>{mediaTypeLabel(item.type)}</span><div className="media-card-meta">{item.type === "video" && <a href={item.url} target="_blank" rel="noreferrer">新窗口打开</a>}<small>馆藏关联媒体</small></div></div>
+                    <div className="media-card-heading"><span>{mediaTypeLabel(item.type)}</span><div className="media-card-meta">{item.type === "video" && <a href={item.url} target="_blank" rel="noreferrer">新窗口打开</a>}<small>{item.filename || "馆藏关联媒体"}</small></div></div>
                     {item.type === "audio" && <audio controls preload="metadata" src={item.url}>浏览器不支持音频播放。</audio>}
                     {item.type === "video" && <video controls preload="metadata" src={item.url}>浏览器不支持视频播放。</video>}
                     {item.type === "image" && <img src={item.url} alt="馆藏文物资料图片" loading="lazy" />}

@@ -11,12 +11,16 @@ class Citation(BaseModel):
     document_id: str | None = None
     url: str | None = None
     excerpt: str | None = None
+    section_path: list[str] = Field(default_factory=list)
+    source_filename: str | None = None
 
 
 class MediaItem(BaseModel):
     id: str
     type: str
     url: str
+    filename: str | None = None
+    match_reason: str | None = None
 
 
 class ChatRequest(BaseModel):

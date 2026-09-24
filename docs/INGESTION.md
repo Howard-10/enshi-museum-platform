@@ -29,6 +29,21 @@ python -m app.cli.import_docx ..\data\raw
 
 ```powershell
 python -m app.cli.import_docx ..\data\raw --artifact "虎钮錞于"
+
+导入器会优先读取 Word 标题层级、列表和表格，再按章节生成父子分块。已有文件需要重建分块时，必须显式使用：
+
+```powershell
+python -m app.cli.import_docx ..\data\raw --infer-artifact-from-path --replace-existing
+```
+
+如果只需要重建数据库中已存在文档的章节分块、保留文档 ID 和审核记录，可以使用：
+
+```powershell
+python -m app.cli.reindex_docx ..\data
+```
+
+重建分块会使旧子块的向量失效；配置好当前 embedding profile 后，再运行现有的
+`python -m app.cli.index_embeddings` 重建向量索引。
 ```
 
 ## 当前不做的事

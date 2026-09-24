@@ -33,7 +33,7 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     # Kept distinct from the legacy `enshi-minio` container so old local
     # object data stays untouched during the rebuild.
     container_name: enshi-museum-minio
@@ -46,7 +46,7 @@ services:
       - "${MINIO_API_PORT}:9000"
       - "${MINIO_CONSOLE_PORT}:9001"
     volumes:
-      - minio_data:/data
+      - ./volumes/minio:/data
 
   backend:
     build:
@@ -99,4 +99,3 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  minio_data:

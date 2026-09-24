@@ -149,13 +149,22 @@ def catalog_metadata_score(value: str | None, query: str) -> int:
     return 70 if any(part in compact_query or f"{part}代" in compact_query for part in parts) else 0
 
 
-def excerpt_for(text: str, terms: Iterable[str], *, max_length: int = 220) -> str:
-    start = next((text.find(term) for term in terms if text.find(term) >= 0), 0)
+def excerpt_for(text: str, terms: Iterable[str], *, max_length: int | None = None) -> str:
+    """Return the evidence text without silently hiding source content.
+
+    Retrieval callers use the complete child chunk by default so the visitor
+    can read the full evidence shown in an answer or citation. A bounded
+    excerpt remains available for future ranking-only callers by passing an
+    explicit ``max_length``.
+    """
+
+    clean_text = text.strip()
+    if max_length is None or len(clean_text) <= max_length:
+        return clean_text
+    start = next((clean_text.find(term) for term in terms if clean_text.find(term) >= 0), 0)
     left = max(0, start - 50)
-    right = min(len(text), left + max_length)
-    prefix = "…" if left else ""
-    suffix = "…" if right < len(text) else ""
-    return f"{prefix}{text[left:right].strip()}{suffix}"
+    right = min(len(clean_text), left + max_length)
+    return clean_text[left:right].strip()
 
 
 class KeywordRetrievalService:
@@ -173,7 +182,7 @@ class KeywordRetrievalService:
         artifacts = await self._find_artifacts(terms, query)
         document_matches = await self._find_document_matches(terms, artifacts)
         media, media_review_status = (
-            await self._find_media(artifacts, media_type=media_type)
+            await self._find_media(query, artifacts, media_type=media_type)
             if include_media
             else ([], None)
         )
@@ -188,6 +197,8 @@ class KeywordRetrievalService:
                 "title": item["title"],
                 "url": None,
                 "excerpt": item["excerpt"],
+                "section_path": item.get("section_path", []),
+                "source_filename": item.get("source_filename"),
             }
             for item in document_matches
         ]
@@ -363,7 +374,15 @@ class KeywordRetrievalService:
         )
         if title_document_ids:
             title_statement = title_statement.limit(MAX_DOCUMENT_CANDIDATES)
-        content_conditions = [DocumentChunk.content.ilike(f"%{term}%") for term in document_terms]
+        content_conditions = [
+            expression.ilike(f"%{term}%")
+            for term in document_terms
+            for expression in (
+                DocumentChunk.content,
+                DocumentChunk.metadata_json["heading_path"].astext,
+                DocumentChunk.metadata_json["heading_text"].astext,
+            )
+        ]
         content_statement = (
             select(DocumentChunk, Document)
             .join(Document, Document.id == DocumentChunk.document_id)
@@ -386,13 +405,16 @@ class KeywordRetrievalService:
         def rank_score(pair: tuple[DocumentChunk, Document]) -> int:
             chunk, document = pair
             content_score = score_text(chunk.content, document_terms)
+            metadata = chunk.metadata_json or {}
+            heading_path = " > ".join(str(item) for item in metadata.get("heading_path", []))
+            heading_score = score_text(heading_path, document_terms)
             title_score = score_text(document.title, title_terms)
             exact_title_bonus = max(
                 (len(term) * 1_000 for term in title_terms if term in document.title),
                 default=0,
             )
             title_priority_bonus = 1_000_000 if str(document.id) in title_priority_ids else 0
-            return content_score + (title_score * 40) + exact_title_bonus + title_priority_bonus
+            return content_score + (heading_score * 90) + (title_score * 40) + exact_title_bonus + title_priority_bonus
 
         ranked = sorted(
             rows,
@@ -404,17 +426,26 @@ class KeywordRetrievalService:
         )
         results: list[dict[str, Any]] = []
         seen_documents: set[str] = set()
+        seen_sources: set[tuple[str, str]] = set()
         for chunk, document in ranked:
             document_id = str(document.id)
             if document_id in seen_documents:
                 continue
+            excerpt = excerpt_for(chunk.content, document_terms)
+            source_key = (document.title.strip(), excerpt)
+            if source_key in seen_sources:
+                continue
             seen_documents.add(document_id)
+            seen_sources.add(source_key)
             results.append(
                 {
                     "document_id": document_id,
                     "chunk_id": str(chunk.id),
                     "title": document.title,
-                    "excerpt": excerpt_for(chunk.content, document_terms),
+                    "excerpt": excerpt,
+                    "section_path": (chunk.metadata_json or {}).get("heading_path", []),
+                    "block_type": (chunk.metadata_json or {}).get("block_type", "paragraph"),
+                    "source_filename": (chunk.metadata_json or {}).get("source_filename"),
                     "score": rank_score((chunk, document)),
                 }
             )
@@ -424,18 +455,32 @@ class KeywordRetrievalService:
 
     async def _find_media(
         self,
+        query: str,
         artifacts: list[ArtifactMatch],
         *,
         media_type: str | None = None,
     ) -> tuple[list[dict[str, str]], str | None]:
-        if not artifacts:
-            return [], None
+        terms = extract_search_terms(query)
         artifact_ids = [UUID(artifact.id) for artifact in artifacts]
         statement = (
             select(MediaAsset)
-            .join(ArtifactMediaLink, ArtifactMediaLink.media_asset_id == MediaAsset.id)
-            .where(ArtifactMediaLink.artifact_id.in_(artifact_ids))
-            .where(ArtifactMediaLink.review_status.in_(("approved", "legacy_verified")))
+            .outerjoin(ArtifactMediaLink, ArtifactMediaLink.media_asset_id == MediaAsset.id)
+            .where(
+                or_(
+                    ArtifactMediaLink.artifact_id.in_(artifact_ids) if artifact_ids else False,
+                    *[
+                        expression.ilike(f"%{term}%")
+                        for term in terms
+                        for expression in (MediaAsset.original_filename, MediaAsset.object_key)
+                    ],
+                )
+            )
+            .where(
+                or_(
+                    ArtifactMediaLink.review_status.in_(("approved", "legacy_verified")),
+                    MediaAsset.metadata_json["association_confidence"].astext.in_(("review", "folder")),
+                )
+            )
             .order_by(MediaAsset.media_type, MediaAsset.original_filename)
             .distinct()
         )
@@ -448,26 +493,35 @@ class KeywordRetrievalService:
             # A single global limit used to hide videos behind many audio files.
             statement = statement.limit(MAX_MEDIA_RESULTS_PER_TYPE * 3)
         rows = (await self.session.execute(statement)).scalars().all()
+        compact_query = NON_WORD.sub("", query).lower()
+
+        def score(asset: MediaAsset) -> int:
+            filename = NON_WORD.sub("", asset.original_filename).lower()
+            stem = NON_WORD.sub("", asset.original_filename.rsplit(".", 1)[0]).lower()
+            value = 0
+            if stem and stem == compact_query:
+                value += 1_000
+            if filename and filename in compact_query:
+                value += 500
+            value += sum(120 for term in terms if term.lower() in filename)
+            if asset.artifact_id in artifact_ids:
+                value += 300
+            return value
+
+        rows = sorted(rows, key=lambda asset: (-score(asset), asset.media_type, asset.original_filename))
+        rows = [asset for asset in rows if score(asset) > 0][: (MAX_MEDIA_RESULTS_PER_TYPE if media_type else MAX_MEDIA_RESULTS_PER_TYPE * 3)]
         storage = MinioStorage()
         items = [
             {
                 "id": str(asset.id),
                 "type": asset.media_type,
                 "url": storage.presigned_download_url(asset.object_key, expires_seconds=600),
+                "filename": asset.original_filename,
+                "match_reason": "filename_or_artifact_match",
             }
             for asset in rows
         ]
-        statuses = {
-            link.review_status
-            for link in (
-                await self.session.scalars(
-                    select(ArtifactMediaLink).where(
-                        ArtifactMediaLink.artifact_id.in_(artifact_ids),
-                        ArtifactMediaLink.review_status.in_(("approved", "legacy_verified")),
-                    )
-                )
-            ).all()
-        }
+        statuses = {"approved" if score(asset) >= 1_000 else "legacy_verified" for asset in rows}
         return items, "approved" if statuses == {"approved"} else "legacy_verified"
 
     async def _approved_document_link_ids(
