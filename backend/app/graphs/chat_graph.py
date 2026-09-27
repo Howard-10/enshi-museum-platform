@@ -4,7 +4,7 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-MEDIA_WORDS = ("\u56fe\u7247", "\u89c6\u9891", "\u97f3\u9891")
+MEDIA_WORDS = ("\u56fe\u7247", "\u7167\u7247", "\u89c6\u9891", "\u97f3\u9891", "\u8bed\u97f3", "\u64ad\u653e", "\u542c\u542c")
 OUT_OF_SCOPE_REQUEST_WORDS = (
     "\u5e02\u573a\u4ef7\u683c",
     "\u4ef7\u683c",
@@ -38,6 +38,12 @@ def _primary_artifact(
     if not artifacts:
         return None
     compact_query = _normalized_query(query)
+    ranked = sorted(artifacts, key=lambda artifact: float(artifact.get("score") or 0), reverse=True)
+    if ranked:
+        top_score = float(ranked[0].get("score") or 0)
+        second_score = float(ranked[1].get("score") or 0) if len(ranked) > 1 else 0
+        if top_score >= 240 and top_score - second_score >= 60:
+            return ranked[0]
     named_matches = [
         artifact
         for artifact in artifacts
@@ -45,8 +51,16 @@ def _primary_artifact(
         and _normalized_query(str(artifact["name"])) in compact_query
     ]
     if named_matches:
-        return max(named_matches, key=lambda artifact: len(str(artifact["name"])))
-    return artifacts[0] if len(artifacts) == 1 else None
+        # Prefer the retrieval score over raw name length.  A descriptive
+        # query may contain a generic suffix (for example ``铜镜``) as well as
+        # enough distinctive fragments to identify ``凤凰八卦铜镜``.
+        return max(
+            named_matches,
+            key=lambda artifact: (float(artifact.get("score") or 0), len(str(artifact["name"]))),
+        )
+    if len(artifacts) == 1:
+        return artifacts[0]
+    return None
 
 
 def _local_answer(
@@ -59,10 +73,21 @@ def _local_answer(
     artifact = _primary_artifact(query, artifacts)
     if artifact:
         name = str(artifact.get("name") or "\u8fd9\u4ef6\u6587\u7269")
+        requested_fields = []
+        if any(word in query for word in ("\u4ec0\u4e48\u5e74\u4ee3", "\u54ea\u4e2a\u671d\u4ee3", "\u5e74\u4ee3", "\u671d\u4ee3")):
+            requested_fields.append(("\u5e74\u4ee3", "era"))
+        if any(word in query for word in ("\u54ea\u91cc", "\u4f4d\u4e8e", "\u51fa\u571f\u5730", "\u5730\u70b9", "\u5730\u5740")):
+            requested_fields.append(("\u5730\u70b9", "location"))
+        if any(word in query for word in ("\u4ec0\u4e48\u6750\u8d28", "\u6750\u6599", "\u6750\u8d28")):
+            requested_fields.append(("\u6750\u8d28", "material"))
+        field_specs = requested_fields or [
+            ("\u5e74\u4ee3", "era"),
+            ("\u5730\u70b9", "location"),
+            ("\u6750\u8d28", "material"),
+        ]
         facts = [
-            f"\u5e74\u4ee3：{artifact['era']}" if artifact.get("era") else None,
-            f"\u5730\u70b9：{artifact['location']}" if artifact.get("location") else None,
-            f"\u6750\u8d28：{artifact['material']}" if artifact.get("material") else None,
+            f"{label}：{artifact[key]}" if artifact.get(key) else None
+            for label, key in field_specs
         ]
         fact_text = "；".join(fact for fact in facts if fact)
         if fact_text:
@@ -76,6 +101,27 @@ def _local_answer(
         if citations:
             answer += f"\u672c\u6b21\u540c\u65f6\u627e\u5230 {len(citations)} \u9879\u76f8\u5173\u8d44\u6599\uff0c\u4e0b\u9762\u53ef\u4ee5\u5c55\u5f00\u67e5\u770b\u51fa\u5904\u3002"
         return answer
+
+    if artifacts:
+        # A broad query can legitimately match several catalog records.  Do
+        # not turn the first unrelated document citation into the answer;
+        # present a short, deterministic catalog list instead.
+        ranked = sorted(
+            artifacts,
+            key=lambda item: float(item.get("score") or 0),
+            reverse=True,
+        )
+        entries = []
+        for item in ranked[:5]:
+            name = str(item.get("name") or "未命名文物")
+            facts = [
+                f"{label}：{item[key]}"
+                for label, key in (("年代", "era"), ("地点", "location"), ("材质", "material"))
+                if item.get(key)
+            ]
+            entries.append(f"“{name}”" + (f"（{'；'.join(facts)}）" if facts else ""))
+        if entries:
+            return f"馆内目录中找到 {len(ranked)} 项相关文物：" + "、".join(entries) + "。"
 
     if citations:
         citation = citations[0]

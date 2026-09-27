@@ -117,14 +117,41 @@ def score_text(text: str, terms: Iterable[str]) -> int:
 
 
 def name_overlap_score(name: str, query: str) -> int:
-    """Score meaningful two-character name fragments found in a natural query."""
+    """Score evidence that the *name* matches a descriptive question.
+
+    The previous implementation gave every artifact with a matching era or
+    material a larger score than a specifically-described artifact.  For
+    example, ``明代铜镜`` could rank a generic copper vessel above
+    ``凤凰八卦铜镜`` because the latter only received a small two-character
+    overlap bonus.  Name n-grams are a stronger identity signal than catalog
+    metadata, while a single generic n-gram (``铜镜``/``石碑``) remains weak.
+    """
 
     compact_query = NON_WORD.sub("", query)
-    fragments = {name[index : index + 2] for index in range(len(name) - 1)}
-    matched = {fragment for fragment in fragments if fragment in compact_query}
-    # One common fragment is too weak; two or more fragments are a useful,
-    # deterministic signal for descriptive questions such as “凤凰和八卦铜镜”.
-    return len(matched) * 20 if len(matched) >= 2 else 0
+    compact_name = NON_WORD.sub("", name)
+    if not compact_name or not compact_query:
+        return 0
+    if compact_name in compact_query and (
+        compact_query == compact_name or len(compact_name) >= 3
+    ):
+        # Exact name mentions must dominate incidental metadata matches.
+        # Longer names are more specific than generic suffixes such as
+        # ``铜镜``.  This matters when a descriptive query contains both.
+        return 5_000 + len(compact_name) * 1_500
+
+    matched_2grams = {
+        compact_name[index : index + 2]
+        for index in range(len(compact_name) - 1)
+        if compact_name[index : index + 2] in compact_query
+    }
+    matched_3grams = {
+        compact_name[index : index + 3]
+        for index in range(len(compact_name) - 2)
+        if compact_name[index : index + 3] in compact_query
+    }
+    # Three-character overlaps are more discriminative than two-character
+    # overlaps.  Keep a single generic overlap useful, but not decisive.
+    return len(matched_3grams) * 180 + len(matched_2grams) * 90
 
 
 def catalog_concept_score(name: str, query: str) -> int:
@@ -295,9 +322,19 @@ class KeywordRetrievalService:
         best: dict[str, ArtifactMatch] = {}
         for artifact in all_artifacts:
             row = catalog_by_artifact_id.get(str(artifact.id))
+            name_score = name_overlap_score(artifact.name, query)
+            compact_artifact_name = NON_WORD.sub("", artifact.name)
+            compact_query = NON_WORD.sub("", query)
+            exact_name_score = (
+                5_000 + len(compact_artifact_name) * 1_500
+                if compact_artifact_name in compact_query
+                and (compact_query == compact_artifact_name or len(compact_artifact_name) >= 3)
+                else 0
+            )
             base_score = max(
+                exact_name_score,
+                name_score,
                 score_text(artifact.name, terms),
-                name_overlap_score(artifact.name, query),
                 *(
                     score_text(alias, terms)
                     for alias in aliases_by_artifact.get(str(artifact.id), [])

@@ -58,7 +58,10 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
     except ConversationOwnershipError as error:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能访问其他用户的对话。") from error
 
-    _, recent_history = await memory.recent_messages(request.session_id)
+    # History is scoped to the authenticated owner.  Passing the user id is
+    # required both for the ownership check and for the PostgreSQL fallback;
+    # omitting it makes every first chat request fail before retrieval starts.
+    _, recent_history = await memory.recent_messages(request.session_id, current_user.id)
     rewrite_context = recent_history[-6:]
     conversation_context = recent_history[-10:]
     rewrite = rewrite_query(request.message, rewrite_context)
@@ -71,6 +74,8 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
                 ("视频", "video"),
                 ("音频", "audio"),
                 ("语音", "audio"),
+                ("听听", "audio"),
+                ("播放", "audio"),
                 ("图片", "image"),
                 ("照片", "image"),
             )

@@ -1,4 +1,4 @@
-from app.services.keyword_retrieval import excerpt_for, extract_search_terms
+from app.services.keyword_retrieval import excerpt_for, extract_search_terms, name_overlap_score
 
 
 def test_extract_search_terms_keeps_artifact_name_from_a_natural_question() -> None:
@@ -6,6 +6,22 @@ def test_extract_search_terms_keeps_artifact_name_from_a_natural_question() -> N
 
     assert "西瓜碑" in terms
     assert "音频" in terms
+
+
+def test_descriptive_name_match_beats_generic_metadata_signal() -> None:
+    query = "一面有凤凰和八卦纹样的明代铜镜是什么"
+
+    assert name_overlap_score("凤凰八卦铜镜", query) > name_overlap_score("缠枝双龙瓶", query)
+
+
+def test_exact_artifact_name_gets_a_dominant_identity_score() -> None:
+    assert name_overlap_score("凤凰八卦铜镜", "请介绍凤凰八卦铜镜") > 10_000
+
+
+def test_specific_name_outranks_a_generic_suffix_in_a_description() -> None:
+    query = "一面有凤凰和八卦纹样的明代铜镜是什么"
+
+    assert name_overlap_score("凤凰八卦铜镜", query) > name_overlap_score("铜镜", query)
 
 
 def test_excerpt_centers_on_the_first_matching_term() -> None:

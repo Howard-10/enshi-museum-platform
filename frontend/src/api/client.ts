@@ -20,7 +20,14 @@ export async function sendChatMessage(payload: ChatRequest): Promise<ChatRespons
 
   if (!response.ok) {
     if (response.status === 401) throw new Error("登录已失效，请重新登录。");
-    throw new Error("后端暂时无法响应，请检查服务是否已启动。");
+    let message = "后端暂时无法响应，请稍后重试。";
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (payload.detail) message = payload.detail;
+    } catch {
+      // Keep the visitor-facing fallback when the server returns no JSON.
+    }
+    throw new Error(message);
   }
 
   return response.json() as Promise<ChatResponse>;

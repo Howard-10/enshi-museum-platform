@@ -30,7 +30,7 @@ BACKGROUND_WORDS = (
     "交流",
     "交融",
 )
-MEDIA_WORDS = ("图片", "视频", "音频")
+MEDIA_WORDS = ("图片", "照片", "视频", "音频", "语音", "播放", "听听")
 
 
 def _compact(value: str) -> str:

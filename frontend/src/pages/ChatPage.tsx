@@ -1008,20 +1008,14 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
     );
   }
 
-  const retrievalLabel = readiness?.retrieval_mode === "hybrid" ? "混合检索" : "关键词检索";
-  const runtimeDisclaimer = readiness
-    ? `当前为${retrievalLabel}；知识库证据链${readiness.vector_search_enabled ? "已就绪" : "正在准备"}；馆外资料${readiness.web_search_enabled ? "已启用" : "关闭"}。`
-    : "正在读取系统状态…";
-
   return (
     <div className="museum-shell">
       <header className="topbar"><div className="brand-mark" aria-label="恩施州博物馆">恩</div><div className="museum-name"><strong>恩施州博物馆</strong><span>ENSHI PREFECTURE MUSEUM</span></div><div className="topbar-divider" /><h1>智能导览问答</h1></header>
       <aside className="sidebar" aria-label="主导航"><nav>{navigation.map((item) => <button className={`nav-item ${activeNavigation === item.key ? "active" : ""}`} key={item.key} type="button" onClick={() => void selectNavigation(item.key)}><span aria-hidden="true">{item.icon}</span>{item.label}</button>)}</nav><div className="sidebar-bottom"><a className="admin-nav-link" href="/admin">⚙ 管理端</a><div className="user-chip"><b>{user.display_name}</b><span>{user.email}</span></div><button className="logout-button" type="button" onClick={onLogout}>退出登录</button><button className="clear-chat" type="button" onClick={() => { setResult(null); setConversation([]); }}>⌫ 清空对话</button></div></aside>
-      <main className="chat-stage">
+      <main className={`chat-stage ${activeNavigation === "chat" ? "chat-stage-chat" : ""}`}>
         {renderMainContent()}
         {activeNavigation === "chat" && <button className="mobile-search-launch" type="button" onClick={() => void selectNavigation("collection")}>⌕ 搜索馆藏</button>}
-        {activeNavigation === "chat" && <form className={`composer ${isSubmitting || isImageSearching ? "composer-floating" : "composer-in-flow"}`} onSubmit={handleSubmit}><label htmlFor="question">发送问题</label><textarea id="question" value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="说说你想了解的文物、背景资料或媒体…" rows={3} /><div className="composer-tools"><div className="composer-icons" aria-hidden="true"><label className="image-upload-button" htmlFor="artifact-image">▧ <span>上传图片</span></label><input id="artifact-image" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleImageSelected} /><span>◌</span><span>♬</span></div><span>Enter 发送，Shift + Enter 换行</span><button type="submit" aria-label="发送问题" disabled={isSubmitting || !message.trim()}>{isSubmitting ? "…" : "→"}</button></div>{imageFile && <div className="image-upload-preview"><img src={imagePreview ?? ""} alt="已选择的文物图片" /><span>{imageFile.name}</span><button type="button" onClick={clearImage} aria-label="移除图片">×</button><button className="image-search-submit" type="button" onClick={() => void handleImageSearch()} disabled={isImageSearching}>识别这件文物</button></div>}{error && <p className="composer-error">{error}</p>}</form>}
-        {activeNavigation === "chat" && <p className="disclaimer">{runtimeDisclaimer}</p>}
+        {activeNavigation === "chat" && <form className="composer" onSubmit={handleSubmit}><label htmlFor="question">发送问题</label><textarea id="question" value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="说说你想了解的文物、背景资料或媒体…" rows={3} /><div className="composer-tools"><div className="composer-icons" aria-hidden="true"><label className="image-upload-button" htmlFor="artifact-image">▧ <span>上传图片</span></label><input id="artifact-image" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleImageSelected} /><span>◌</span><span>♬</span></div><span>Enter 发送，Shift + Enter 换行</span><button type="submit" aria-label="发送问题" disabled={isSubmitting || !message.trim()}>{isSubmitting ? "…" : "→"}</button></div>{imageFile && <div className="image-upload-preview"><img src={imagePreview ?? ""} alt="已选择的文物图片" /><span>{imageFile.name}</span><button type="button" onClick={clearImage} aria-label="移除图片">×</button><button className="image-search-submit" type="button" onClick={() => void handleImageSearch()} disabled={isImageSearching}>识别这件文物</button></div>}{error && <p className="composer-error">{error}</p>}</form>}
       </main>
     </div>
   );

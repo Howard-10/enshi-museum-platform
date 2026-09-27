@@ -259,6 +259,7 @@ export function AdminPage() {
           <button className="admin-primary" type="submit">进入管理端</button>
           {error && <p className="admin-error">{error}</p>}
           <small>当前是本机令牌版，正式部署前再接学校统一登录。</small>
+          <a className="admin-return-link" href="/">← 返回游客端</a>
         </form>
       </main>
     );
@@ -273,6 +274,7 @@ export function AdminPage() {
           <p>维护文物、文档、图片、音频和视频的元数据与关联关系。</p>
         </div>
         <div className="admin-header-actions">
+          <a className="admin-return-link" href="/">← 返回游客端</a>
           <button type="button" onClick={() => void loadData()} disabled={loading}>↻ 刷新</button>
           <button type="button" onClick={logout}>退出管理端</button>
         </div>

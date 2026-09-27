@@ -1,8 +1,13 @@
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.v1.router import api_router
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -21,6 +26,17 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected_error(request: Request, error: Exception) -> JSONResponse:
+        # Keep the traceback in server logs while returning a stable JSON
+        # response that still passes through CORS middleware.
+        logger.exception("Unhandled API error on %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "服务器暂时无法完成请求，请稍后重试。"},
+        )
+
     app.include_router(api_router, prefix="/api/v1")
     return app
 

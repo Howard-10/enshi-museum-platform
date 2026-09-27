@@ -9,7 +9,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 class Settings(BaseSettings):
     """All deployment-specific configuration belongs in environment variables."""
 
-    model_config = SettingsConfigDict(env_file=PROJECT_ROOT / ".env", extra="ignore")
+    # Do not implicitly read the deployment .env file for every Settings()
+    # instance.  Callers that build an isolated config (tests, migrations,
+    # one-off jobs) must get safe defaults unless they explicitly opt in.
+    model_config = SettingsConfigDict(env_file=None, extra="ignore")
 
     app_name: str = "恩施文博智能导览平台"
     frontend_origin: str = "http://localhost:5173"
@@ -53,7 +56,10 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # The application singleton is the one place that loads deployment
+    # configuration.  Keeping this explicit prevents a test or helper object
+    # from silently inheriting external model/search switches from .env.
+    return Settings(_env_file=PROJECT_ROOT / ".env")
 
 
 settings = get_settings()
