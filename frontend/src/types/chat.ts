@@ -21,6 +21,9 @@ export interface MediaItem {
   url: string;
   filename?: string | null;
   match_reason?: string | null;
+  artifact_id?: string | null;
+  evidence_status?: string;
+  match_confidence?: number | null;
 }
 
 export interface ChatResponse {
@@ -34,6 +37,7 @@ export interface ChatResponse {
   notice?: string | null;
   citations: Citation[];
   media: MediaItem[];
+  media_status?: Record<string, string>;
 }
 
 export interface ConversationMessage {

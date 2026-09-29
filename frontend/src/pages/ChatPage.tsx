@@ -108,6 +108,7 @@ function historyToTurns(messages: ConversationMessage[]): ConversationTurn[] {
         reason_codes: [],
         citations: answer.citations,
         media: answer.media,
+        media_status: {},
       },
     });
     index += 1;
@@ -141,6 +142,7 @@ function reasonCodeLabel(code: string) {
     approved_document_link: "已关联审核通过的馆内资料",
     no_verified_evidence: "没有审核通过的馆藏证据",
     chat_generation_disabled: "已采用馆内资料回答",
+    chat_generation_circuit_open: "模型服务暂不可用，已采用馆内资料回答",
     generation_failed: "已采用馆内资料回答",
     vector_search_unavailable: "已使用馆内资料检索",
     conflicting_internal_evidence: "馆内资料之间存在冲突",
@@ -149,6 +151,9 @@ function reasonCodeLabel(code: string) {
     external_search_budget_exhausted: "外部搜索额度已用完",
     external_search_unavailable: "外部搜索暂不可用",
   };
+  if (code.startsWith("chat_generation_error:")) {
+    return "模型服务暂不可用，已采用馆内资料回答";
+  }
   return labels[code] ?? code;
 }
 
@@ -928,13 +933,19 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
           )}
           <section className="answer-panel" aria-live="polite">
           <div className="answer-topline">
-            <p className="answer-label">{result.intent === "media" ? "媒体导览" : "智能导览"}</p>
+            <p className="answer-label">{result.intent === "media" ? "媒体导览" : result.intent === "mixed" ? "文物与媒体导览" : "智能导览"}</p>
             <span className={`evidence-badge ${result.evidence_status}`}>{evidenceStatusLabel(result.evidence_status)}</span>
           </div>
           <p className={`answer-scope ${result.answer_scope}`}>{scopeLabel(result.answer_scope)}</p>
           <h2>关于你的问题</h2>
           <p className="answer-text">{result.answer}</p>
           {result.notice && <p className="answer-notice">{result.notice}</p>}
+          {Object.keys(result.media_status ?? {}).length > 0 && (
+            <div className="answer-notice">
+              <b>媒体请求状态</b>
+              <span>{Object.entries(result.media_status ?? {}).map(([type, status]) => `${mediaTypeLabel(type)}：${status === "available" ? "已找到" : status === "needs_review" ? "待审核" : status === "subject_required" ? "请先指定文物" : "暂无"}`).join("；")}</span>
+            </div>
+          )}
           {result.evidence_status !== "sufficient" && (
             <div className="answer-notice">
               <b>处理说明</b>

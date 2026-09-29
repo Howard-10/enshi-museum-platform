@@ -4,7 +4,9 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-MEDIA_WORDS = ("\u56fe\u7247", "\u7167\u7247", "\u89c6\u9891", "\u97f3\u9891", "\u8bed\u97f3", "\u64ad\u653e", "\u542c\u542c")
+from app.services.query_planner import MEDIA_TYPE_ALIASES, has_media_request
+
+MEDIA_WORDS = tuple(alias for aliases in MEDIA_TYPE_ALIASES.values() for alias in aliases)
 OUT_OF_SCOPE_REQUEST_WORDS = (
     "\u5e02\u573a\u4ef7\u683c",
     "\u4ef7\u683c",
@@ -92,7 +94,20 @@ def _local_answer(
         fact_text = "；".join(fact for fact in facts if fact)
         if fact_text:
             answer = f"\u9986\u5185\u76ee\u5f55\u663e\u793a\uff0c\u201c{name}\u201d\u5df2\u786e\u8ba4\u7684\u4fe1\u606f\u662f：{fact_text}\u3002"
-            if any(word in query for word in ("\u4ecb\u7ecd", "\u662f\u4ec0\u4e48", "\u8bb2\u8bb2", "\u8bf4\u8bf4")):
+            background_citations = [
+                citation
+                for citation in citations
+                if citation.get("source_type") == "internal"
+                and "（\u6807\u51c6\u76ee\u5f55）" not in str(citation.get("title") or "")
+                and citation.get("excerpt")
+            ]
+            if background_citations and any(
+                word in query
+                for word in ("\u4ecb\u7ecd", "\u5386\u53f2", "\u80cc\u666f", "\u6587\u5316", "\u7528\u9014", "\u610f\u4e49", "\u6545\u4e8b")
+            ):
+                excerpt = " ".join(str(background_citations[0]["excerpt"]).split())
+                answer += f"\u5df2\u5ba1\u6838\u8d44\u6599\u8865\u5145：{excerpt[:360]}"
+            if any(word in query for word in ("\u4ecb\u7ecd", "\u662f\u4ec0\u4e48", "\u8bb2\u8bb2", "\u8bf4\u8bf4")) and not background_citations:
                 answer += "\u76ee\u524d\u9986\u5185\u76ee\u5f55\u6682\u672a\u8bb0\u5f55\u8fd9\u4ef6\u6587\u7269\u7684\u5f62\u5236\u3001\u7eb9\u9970\u3001\u7528\u9014\u7b49\u66f4\u8be6\u7ec6\u4fe1\u606f\u3002"
         elif citations and citations[0].get("excerpt"):
             answer = f"\u9986\u5185\u8d44\u6599\u663e\u793a\uff0c\u201c{name}\u201d\u76f8\u5173\u8bb0\u5f55\u4e3a：{citations[0]['excerpt']}"
@@ -148,12 +163,17 @@ class ChatState(TypedDict):
     notice: str | None
     evidence_status: str
     reason_codes: list[str]
+    query_plan: dict[str, Any]
 
 
 def classify_intent(state: ChatState) -> dict[str, str]:
     """A deterministic pre-classifier until model-based intent routing is enabled."""
 
-    intent = "media" if any(word in state["user_query"] for word in MEDIA_WORDS) else "knowledge"
+    plan = state.get("query_plan") or {}
+    intent = str(
+        plan.get("intent")
+        or ("media" if has_media_request(state["user_query"]) else "knowledge")
+    )
     return {"intent": intent}
 
 
@@ -165,6 +185,15 @@ def answer_query(state: ChatState) -> dict[str, object]:
     citations = retrieval["citations"]
     media = retrieval["media"]
     evidence_status = state["evidence_status"]
+    query_plan = state.get("query_plan") or {}
+    if query_plan.get("needs_clarification"):
+        return {
+            "answer": "请告诉我具体是哪件文物，我才能准确查找对应的图片、音频或视频。",
+            "answer_scope": "insufficient_evidence",
+            "notice": "媒体请求缺少明确的文物对象。",
+            "citations": [],
+            "media": [],
+        }
     if evidence_status == "conflicting":
         return {
             "answer": "馆内资料存在同级证据冲突，目前不能给出确定性结论。",

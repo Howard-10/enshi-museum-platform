@@ -1,4 +1,10 @@
-from app.services.keyword_retrieval import excerpt_for, extract_search_terms, name_overlap_score
+from app.services.keyword_retrieval import (
+    artifact_query_for_media,
+    excerpt_for,
+    extract_search_terms,
+    media_subject_for_query,
+    name_overlap_score,
+)
 
 
 def test_extract_search_terms_keeps_artifact_name_from_a_natural_question() -> None:
@@ -6,6 +12,17 @@ def test_extract_search_terms_keeps_artifact_name_from_a_natural_question() -> N
 
     assert "西瓜碑" in terms
     assert "音频" in terms
+
+
+def test_media_query_keeps_artifact_subject_but_removes_delivery_words() -> None:
+    assert artifact_query_for_media("请播放西瓜碑音频") == "西瓜碑"
+    assert artifact_query_for_media("关于西瓜碑的音频") == "西瓜碑"
+
+
+def test_media_subject_can_be_recovered_from_verified_filename() -> None:
+    media = [{"filename": "西瓜碑一（1）.m4a", "type": "audio"}]
+
+    assert media_subject_for_query("西瓜碑音频", media) == "西瓜碑"
 
 
 def test_descriptive_name_match_beats_generic_metadata_signal() -> None:

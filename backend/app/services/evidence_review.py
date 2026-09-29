@@ -1,7 +1,8 @@
 """Candidate generation for the human evidence-review workflow.
 
-Candidates are deliberately stored as ``needs_review``. This module never
-promotes a Word document, alias, or media relationship to usable evidence.
+Fuzzy matches remain ``needs_review``. The only automatic promotion permitted
+here is a unique exact title/filename match for a document that has already
+passed document-level review.
 """
 
 from __future__ import annotations
@@ -29,11 +30,37 @@ def normalized_name(value: str) -> str:
     return _PUNCTUATION.sub("", value).strip()
 
 
+def _source_filename_stem(value: str | None) -> str:
+    if not value:
+        return ""
+    filename = re.split(r"[\\/]", value)[-1]
+    return filename.rsplit(".", 1)[0] if "." in filename else filename
+
+
+def _exact_artifact_match(document: Document, artifacts: list[Artifact]) -> Artifact | None:
+    """Return a unique identity match based only on title or source filename."""
+
+    document_keys = {
+        key
+        for key in (
+            normalized_name(document.title),
+            normalized_name(_source_filename_stem(document.source_filename)),
+        )
+        if key
+    }
+    matches = [
+        artifact for artifact in artifacts if normalized_name(artifact.name) in document_keys
+    ]
+    unique_ids = {str(artifact.id) for artifact in matches}
+    return matches[0] if len(unique_ids) == 1 else None
+
+
 @dataclass(frozen=True)
 class CandidateSummary:
     documents_scanned: int
     artifact_alias_candidates: int
     document_link_candidates: int
+    document_link_auto_approved: int = 0
 
 
 def _document_match_reasons(
@@ -77,11 +104,13 @@ async def generate_review_candidates(session: AsyncSession) -> CandidateSummary:
         (str(item.artifact_id), str(item.document_id))
         for item in (await session.scalars(select(ArtifactDocumentLink))).all()
     }
-    reviewed_document_ids = {
-        item.document_id for item in (await session.scalars(select(DocumentEvidenceReview))).all()
+    review_status_by_document = {
+        item.document_id: item.review_status
+        for item in (await session.scalars(select(DocumentEvidenceReview))).all()
     }
     alias_count = 0
     link_count = 0
+    auto_approved_count = 0
     aliases_by_artifact: dict[str, list[str]] = {}
     for artifact in artifacts:
         candidate = normalized_name(artifact.name)
@@ -108,7 +137,7 @@ async def generate_review_candidates(session: AsyncSession) -> CandidateSummary:
         aliases_by_artifact.setdefault(str(item.artifact_id), []).append(item.alias)
 
     for document in documents:
-        if document.id not in reviewed_document_ids:
+        if document.id not in review_status_by_document:
             session.add(
                 DocumentEvidenceReview(
                     document_id=document.id,
@@ -116,27 +145,42 @@ async def generate_review_candidates(session: AsyncSession) -> CandidateSummary:
                     review_note="待审核：已生成候选关联；无候选时也需要确认其是否属于背景资料。",
                 )
             )
+            document_review_status = REVIEW_NEEDS
+        else:
+            document_review_status = review_status_by_document[document.id]
+        exact_artifact = _exact_artifact_match(document, artifacts)
         for artifact in artifacts:
             artifact_aliases = aliases_by_artifact.get(str(artifact.id), [])
             reasons = _document_match_reasons(document, artifact, artifact_aliases)
             if not reasons or (str(artifact.id), str(document.id)) in existing_links:
                 continue
+            auto_approve = (
+                document_review_status == APPROVED
+                and exact_artifact is not None
+                and artifact.id == exact_artifact.id
+            )
             session.add(
                 ArtifactDocumentLink(
                     artifact_id=artifact.id,
                     document_id=document.id,
                     match_reasons=reasons,
-                    confidence=_confidence(reasons, artifact.name),
-                    review_status=REVIEW_NEEDS,
-                    review_note="自动候选，尚未审核；不得作为馆藏事实证据。",
+                    confidence=100 if auto_approve else _confidence(reasons, artifact.name),
+                    review_status=APPROVED if auto_approve else REVIEW_NEEDS,
+                    review_note=(
+                        "自动通过：文档已审核通过，且标题或文件名与唯一文物名称完全一致。"
+                        if auto_approve
+                        else "自动候选，尚未审核；不得作为馆藏事实证据。"
+                    ),
                 )
             )
             link_count += 1
+            auto_approved_count += int(auto_approve)
     await session.commit()
     return CandidateSummary(
         documents_scanned=len(documents),
         artifact_alias_candidates=alias_count,
         document_link_candidates=link_count,
+        document_link_auto_approved=auto_approved_count,
     )
 
 

@@ -103,11 +103,15 @@ class RagPipeline:
         *,
         include_media: bool,
         media_type: str | None = None,
+        media_types: list[str] | tuple[str, ...] | None = None,
+        preferred_artifact_id: str | None = None,
     ) -> dict[str, Any]:
         keyword_result = await KeywordRetrievalService(self.session).search(
             query,
             include_media=include_media,
             media_type=media_type,
+            media_types=media_types,
+            preferred_artifact_id=preferred_artifact_id,
         )
         keyword_documents = keyword_result["document_matches"][:20]
         # Keyword service already returns one best child per source document.
@@ -163,6 +167,13 @@ class RagPipeline:
         keyword_result["retrieval_trace"] = {
             "sources": list(rankings),
             "rrf_k": RRF_K,
+            "candidate_counts": {
+                "keyword_documents": len(keyword_documents),
+                "vector_documents": len(vector_documents),
+                "fused_documents": len(candidates),
+                "reranked_documents": len(ranked_children),
+                "final_documents": len(documents),
+            },
             "reranker": "deterministic_lexical"
             if not readiness.reranker_enabled
             else "pending_external",

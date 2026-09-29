@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     embedding_indexing_enabled: bool = False
     hybrid_retrieval_enabled: bool = False
     chat_generation_enabled: bool = False
+    # Provider calls must fail fast enough for the local fallback to remain
+    # responsive. Repeated provider failures are short-circuited in memory.
+    chat_request_timeout_seconds: int = 20
+    chat_failure_threshold: int = 2
+    chat_circuit_cooldown_seconds: int = 60
+    # Optional phase-3 query planning. Keep disabled until the provider has
+    # passed the runtime smoke test; deterministic planning remains complete.
+    query_planner_model_enabled: bool = False
     web_search_enabled: bool = False
     web_search_provider: str = "tavily"
     tavily_api_key: str | None = None

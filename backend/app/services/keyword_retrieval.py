@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Any
 from uuid import UUID
 
@@ -49,9 +50,13 @@ CATALOG_CONCEPT_HINTS: dict[str, tuple[str, ...]] = {
 }
 
 REQUEST_NOISE = re.compile(
-    r"请问|请|帮我|介绍一下|介绍|讲讲|说说|告诉我|有哪些|有什么|是什么|怎么样|如何|的|吗|呢"
+    r"请问|请|帮我|给我|我想|关于|查询|查一下|查看|介绍一下|介绍|讲讲|说说|告诉我|有哪些|有什么|是什么|怎么样|如何|的|吗|呢"
 )
 NON_WORD = re.compile(r"[^\u4e00-\u9fffA-Za-z0-9]+")
+MEDIA_QUERY_WORDS = (
+    "图片", "照片", "配图", "原图", "视频", "录像", "音频", "语音", "录音",
+    "播放", "看看", "看一下", "听听", "听一下", "媒体", "多媒体", "相关资料",
+)
 
 
 @dataclass(frozen=True)
@@ -112,6 +117,29 @@ def extract_search_terms(query: str) -> list[str]:
     return unique
 
 
+def artifact_query_for_media(query: str) -> str:
+    """Remove delivery words before resolving the requested artifact."""
+
+    cleaned = query
+    for word in MEDIA_QUERY_WORDS:
+        cleaned = cleaned.replace(word, "")
+    return REQUEST_NOISE.sub("", cleaned).strip()
+
+
+def media_subject_for_query(query: str, media: list[dict[str, str]]) -> str | None:
+    """Recover a display subject from a verified media filename."""
+
+    subject = artifact_query_for_media(query)
+    compact_subject = NON_WORD.sub("", subject)
+    if len(compact_subject) < 2:
+        return None
+    for item in media:
+        filename = NON_WORD.sub("", str(item.get("filename") or ""))
+        if compact_subject in filename:
+            return subject
+    return None
+
+
 def score_text(text: str, terms: Iterable[str]) -> int:
     return sum(len(term) * 10 for term in terms if term in text)
 
@@ -151,7 +179,20 @@ def name_overlap_score(name: str, query: str) -> int:
     }
     # Three-character overlaps are more discriminative than two-character
     # overlaps.  Keep a single generic overlap useful, but not decisive.
-    return len(matched_3grams) * 180 + len(matched_2grams) * 90
+    overlap_score = len(matched_3grams) * 180 + len(matched_2grams) * 90
+    # A small typo should not make a known catalog name disappear. Only use
+    # fuzzy similarity for a short query fragment; long natural-language
+    # questions are already handled by exact n-gram and metadata signals.
+    fuzzy_score = 0
+    query_fragments = [fragment for fragment in re.split(r"[\s，。！？?、]+", compact_query) if fragment]
+    if len(compact_name) >= 3:
+        similarity = max(
+            (SequenceMatcher(None, compact_name, fragment).ratio() for fragment in query_fragments),
+            default=0.0,
+        )
+        if similarity >= 0.72:
+            fuzzy_score = int(similarity * 220)
+    return overlap_score + fuzzy_score
 
 
 def catalog_concept_score(name: str, query: str) -> int:
@@ -204,15 +245,47 @@ class KeywordRetrievalService:
         *,
         include_media: bool,
         media_type: str | None = None,
+        media_types: list[str] | tuple[str, ...] | None = None,
+        preferred_artifact_id: str | None = None,
     ) -> dict[str, Any]:
         terms = extract_search_terms(query)
-        artifacts = await self._find_artifacts(terms, query)
+        artifact_query = artifact_query_for_media(query) if include_media else query
+        if preferred_artifact_id:
+            preferred_artifact = await self.session.scalar(
+                select(Artifact).where(Artifact.id == UUID(preferred_artifact_id))
+            )
+            if preferred_artifact is not None:
+                artifact_query = f"{preferred_artifact.name} {artifact_query}".strip()
+                terms = [preferred_artifact.name, *terms]
+        artifact_terms = extract_search_terms(artifact_query)
+        artifacts = await self._find_artifacts(artifact_terms, artifact_query)
         document_matches = await self._find_document_matches(terms, artifacts)
+        resolved_media_types = tuple(media_types or ((media_type,) if media_type else ()))
         media, media_review_status = (
-            await self._find_media(query, artifacts, media_type=media_type)
+            await self._find_media(query, artifacts, media_types=resolved_media_types)
             if include_media
             else ([], None)
         )
+        artifact_items = [artifact.as_dict() for artifact in artifacts]
+        media_subject = media_subject_for_query(query, media) if media else None
+        if media_subject and not any(item["name"] == media_subject for item in artifact_items):
+            # This is presentation metadata, not a catalog match. It lets the
+            # visitor-facing response name the verified media subject instead
+            # of exposing a generic import-folder artifact.
+            artifact_items.insert(
+                0,
+                {
+                    "id": f"media:{media[0]['id']}",
+                    "name": media_subject,
+                    "era": None,
+                    "location": None,
+                    "material": None,
+                    "score": 4_000,
+                    "catalog_record_id": None,
+                    "catalog_source_uri": None,
+                    "match_kind": "media_filename",
+                },
+            )
         approved_links = await self._approved_document_link_ids(document_matches, artifacts)
         approved_document_reviews = await self._approved_document_review_ids(document_matches)
         citations = [
@@ -278,7 +351,7 @@ class KeywordRetrievalService:
         return {
             "mode": "keyword",
             "query_terms": terms,
-            "artifacts": [artifact.as_dict() for artifact in artifacts],
+            "artifacts": artifact_items,
             "document_matches": document_matches,
             "citations": citations,
             "catalog_citations": catalog_citations,
@@ -288,6 +361,7 @@ class KeywordRetrievalService:
             "has_approved_document_review": bool(approved_document_reviews),
             "approved_document_review_ids": approved_document_reviews,
             "media_review_status": media_review_status,
+            "media_types": list(resolved_media_types),
         }
 
     async def _find_artifacts(self, terms: list[str], query: str) -> list[ArtifactMatch]:
@@ -495,8 +569,8 @@ class KeywordRetrievalService:
         query: str,
         artifacts: list[ArtifactMatch],
         *,
-        media_type: str | None = None,
-    ) -> tuple[list[dict[str, str]], str | None]:
+        media_types: tuple[str, ...] = (),
+    ) -> tuple[list[dict[str, Any]], str | None]:
         terms = extract_search_terms(query)
         artifact_ids = [UUID(artifact.id) for artifact in artifacts]
         statement = (
@@ -521,13 +595,11 @@ class KeywordRetrievalService:
             .order_by(MediaAsset.media_type, MediaAsset.original_filename)
             .distinct()
         )
-        if media_type:
-            statement = statement.where(MediaAsset.media_type == media_type).limit(
-                MAX_MEDIA_RESULTS_PER_TYPE
+        if media_types:
+            statement = statement.where(MediaAsset.media_type.in_(media_types)).limit(
+                MAX_MEDIA_RESULTS_PER_TYPE * len(media_types)
             )
         else:
-            # Keep all three media types visible for a general media request.
-            # A single global limit used to hide videos behind many audio files.
             statement = statement.limit(MAX_MEDIA_RESULTS_PER_TYPE * 3)
         rows = (await self.session.execute(statement)).scalars().all()
         compact_query = NON_WORD.sub("", query).lower()
@@ -546,7 +618,29 @@ class KeywordRetrievalService:
             return value
 
         rows = sorted(rows, key=lambda asset: (-score(asset), asset.media_type, asset.original_filename))
-        rows = [asset for asset in rows if score(asset) > 0][: (MAX_MEDIA_RESULTS_PER_TYPE if media_type else MAX_MEDIA_RESULTS_PER_TYPE * 3)]
+        rows = [asset for asset in rows if score(asset) > 0]
+        if media_types:
+            grouped: dict[str, list[MediaAsset]] = {media_type: [] for media_type in media_types}
+            for asset in rows:
+                if asset.media_type in grouped and len(grouped[asset.media_type]) < MAX_MEDIA_RESULTS_PER_TYPE:
+                    grouped[asset.media_type].append(asset)
+            rows = [asset for media_type in media_types for asset in grouped[media_type]]
+        else:
+            rows = rows[: MAX_MEDIA_RESULTS_PER_TYPE * 3]
+        link_statuses: dict[str, set[str]] = {}
+        link_artifact_ids: dict[str, set[str]] = {}
+        if rows:
+            link_statement = select(ArtifactMediaLink).where(
+                ArtifactMediaLink.media_asset_id.in_([asset.id for asset in rows])
+            )
+            if artifact_ids:
+                link_statement = link_statement.where(
+                    ArtifactMediaLink.artifact_id.in_(artifact_ids)
+                )
+            links = (await self.session.scalars(link_statement)).all()
+            for link in links:
+                link_statuses.setdefault(str(link.media_asset_id), set()).add(link.review_status)
+                link_artifact_ids.setdefault(str(link.media_asset_id), set()).add(str(link.artifact_id))
         storage = MinioStorage()
         items = [
             {
@@ -554,12 +648,29 @@ class KeywordRetrievalService:
                 "type": asset.media_type,
                 "url": storage.presigned_download_url(asset.object_key, expires_seconds=600),
                 "filename": asset.original_filename,
-                "match_reason": "filename_or_artifact_match",
+                "match_reason": "artifact_link" if str(asset.id) in link_artifact_ids else "filename_match",
+                "artifact_id": next(iter(link_artifact_ids.get(str(asset.id), set())), None)
+                or (str(asset.artifact_id) if asset.artifact_id in artifact_ids else None),
+                "evidence_status": (
+                    "approved"
+                    if "approved" in link_statuses.get(str(asset.id), set())
+                    else "legacy_verified"
+                    if "legacy_verified" in link_statuses.get(str(asset.id), set())
+                    else "needs_review"
+                ),
+                "match_confidence": 1.0 if score(asset) >= 1_000 else 0.65,
             }
             for asset in rows
         ]
-        statuses = {"approved" if score(asset) >= 1_000 else "legacy_verified" for asset in rows}
-        return items, "approved" if statuses == {"approved"} else "legacy_verified"
+        statuses = {item["evidence_status"] for item in items}
+        aggregate_status = (
+            "approved"
+            if statuses and statuses == {"approved"}
+            else "legacy_verified"
+            if statuses and statuses <= {"approved", "legacy_verified"}
+            else "needs_review"
+        )
+        return items, aggregate_status if items else None
 
     async def _approved_document_link_ids(
         self, documents: list[dict[str, Any]], artifacts: list[ArtifactMatch]

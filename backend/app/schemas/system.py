@@ -22,3 +22,7 @@ class SystemReadinessResponse(BaseModel):
     catalog_artifacts: int
     media_assets: int
     approved_document_links: int = 0
+    chat_runtime_status: str = "unknown"
+    chat_failure_count: int = 0
+    chat_last_error: str | None = None
+    chat_retry_after_seconds: int = 0

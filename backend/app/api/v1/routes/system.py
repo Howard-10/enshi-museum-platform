@@ -17,6 +17,7 @@ from app.db.models.core import (
 from app.db.session import get_db_session
 from app.schemas.system import SystemReadinessResponse
 from app.services.model_readiness import get_model_readiness
+from app.services.model_runtime import chat_generation_runtime
 
 router = APIRouter()
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
@@ -42,6 +43,15 @@ async def get_system_readiness(session: DbSession) -> SystemReadinessResponse:
         .select_from(ArtifactDocumentLink)
         .where(ArtifactDocumentLink.review_status == "approved")
     )
+    runtime = chat_generation_runtime.snapshot()
+    if not readiness.chat_generation_enabled:
+        chat_runtime_status = "disabled"
+    elif runtime.circuit_open:
+        chat_runtime_status = "circuit_open"
+    elif runtime.failure_count:
+        chat_runtime_status = "degraded"
+    else:
+        chat_runtime_status = "configured"
     return SystemReadinessResponse(
         retrieval_mode=readiness.retrieval_mode,
         external_model_calls_enabled=readiness.external_calls_enabled,
@@ -65,4 +75,8 @@ async def get_system_readiness(session: DbSession) -> SystemReadinessResponse:
         catalog_artifacts=catalog_artifacts or 0,
         media_assets=media_assets or 0,
         approved_document_links=approved_document_links or 0,
+        chat_runtime_status=chat_runtime_status,
+        chat_failure_count=runtime.failure_count,
+        chat_last_error=runtime.last_error,
+        chat_retry_after_seconds=runtime.retry_after_seconds,
     )

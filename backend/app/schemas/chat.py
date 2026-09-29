@@ -21,6 +21,9 @@ class MediaItem(BaseModel):
     url: str
     filename: str | None = None
     match_reason: str | None = None
+    artifact_id: str | None = None
+    evidence_status: str = "unknown"
+    match_confidence: float | None = None
 
 
 class ChatRequest(BaseModel):
@@ -44,3 +47,4 @@ class ChatResponse(BaseModel):
     notice: str | None = None
     citations: list[Citation] = []
     media: list[MediaItem] = []
+    media_status: dict[str, str] = {}

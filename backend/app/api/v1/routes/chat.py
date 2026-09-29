@@ -8,12 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import CurrentUser
 from app.core.config import settings
 from app.db.session import get_db_session
-from app.graphs.chat_graph import MEDIA_WORDS, OUT_OF_SCOPE_REQUEST_WORDS, chat_graph
+from app.graphs.chat_graph import OUT_OF_SCOPE_REQUEST_WORDS, _primary_artifact, chat_graph
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.schemas.conversation import ConversationHistoryResponse, ConversationMessageRead
 from app.services.answer_generation import generate_grounded_answer
 from app.services.conversation_memory import ConversationMemoryService, ConversationOwnershipError
 from app.services.evidence_gate import evidence_gate
+from app.services.model_query_planner import enrich_query_plan
+from app.services.query_planner import plan_query
 from app.services.query_rewriter import rewrite_query
 from app.services.rag_pipeline import RagPipeline
 from app.services.web_search import (
@@ -66,29 +68,36 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
     conversation_context = recent_history[-10:]
     rewrite = rewrite_query(request.message, rewrite_context)
     effective_query = rewrite.standalone_query
-    wants_media = any(word in effective_query for word in MEDIA_WORDS)
-    requested_media_type = next(
-        (
-            media_type
-            for keyword, media_type in (
-                ("视频", "video"),
-                ("音频", "audio"),
-                ("语音", "audio"),
-                ("听听", "audio"),
-                ("播放", "audio"),
-                ("图片", "image"),
-                ("照片", "image"),
-            )
-            if keyword in effective_query
-        ),
-        None,
+    query_plan = plan_query(effective_query, recent_history)
+    query_plan, query_plan_reason = await enrich_query_plan(
+        query_plan,
+        history=rewrite_context,
     )
+    wants_media = query_plan.media_request.required and not query_plan.needs_clarification
     retrieval = await RagPipeline(session).search(
-        effective_query,
+        query_plan.retrieval_query,
         include_media=wants_media,
-        media_type=requested_media_type,
+        media_types=query_plan.media_request.types,
+        preferred_artifact_id=query_plan.active_artifact_id,
     )
+    retrieval = {
+        **retrieval,
+        "query_tasks": list(query_plan.tasks),
+        "media_request": query_plan.media_request.as_dict(),
+        "query_plan": query_plan.as_dict(),
+    }
+    # Only verified media is visitor-facing. Candidates that were found by a
+    # filename/folder hint remain available for diagnostics but cannot be
+    # rendered as if they were confirmed links.
+    retrieval["media_candidates"] = retrieval.get("media", [])
+    retrieval["media"] = [
+        item
+        for item in retrieval.get("media", [])
+        if item.get("evidence_status") in {"approved", "legacy_verified"}
+    ]
     gate = evidence_gate(effective_query, retrieval)
+    if query_plan_reason:
+        gate["reason_codes"] = [*gate["reason_codes"], query_plan_reason]
     if rewrite.used_history:
         gate["reason_codes"] = [*gate["reason_codes"], "conversation_context_used"]
     if gate.get("citation_scope") == "catalog_only":
@@ -129,6 +138,7 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
             "notice": None,
             "evidence_status": gate["evidence_status"],
             "reason_codes": gate["reason_codes"],
+            "query_plan": query_plan.as_dict(),
         }
     )
     generated, generation_reason = (None, None)
@@ -224,6 +234,7 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
                         external_retrieval,
                         original_query=request.message,
                         conversation_context=conversation_context,
+                        query_plan=query_plan.as_dict(),
                     )
                     if generated is not None:
                         result = {
@@ -301,12 +312,35 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
             retrieval,
             original_query=request.message,
             conversation_context=conversation_context,
+            query_plan=query_plan.as_dict(),
         )
     if generated is not None and gate["evidence_status"] == "sufficient" and not external_search_used:
         result = {**result, **generated, "notice": "回答基于本轮馆内资料生成，来源可追溯。"}
     elif generation_reason and gate["evidence_status"] == "sufficient":
         result["notice"] = "当前采用馆内资料直答模式，内容来源可追溯。"
         gate["reason_codes"] = [*gate["reason_codes"], generation_reason]
+    requested_media_types = list(query_plan.media_request.types)
+    media_status: dict[str, str] = {}
+    if query_plan.media_request.required:
+        if query_plan.needs_clarification:
+            media_status = {media_type: "subject_required" for media_type in requested_media_types}
+        else:
+            verified_types = {item.get("type") for item in retrieval.get("media", [])}
+            candidate_types = {item.get("type") for item in retrieval.get("media_candidates", [])}
+            media_status = {
+                media_type: "available"
+                if media_type in verified_types
+                else "needs_review"
+                if media_type in candidate_types
+                else "not_found"
+                for media_type in requested_media_types
+            }
+    active_artifact = _primary_artifact(effective_query, retrieval.get("artifacts", []))
+    active_artifact_id = query_plan.active_artifact_id
+    active_artifact_name = query_plan.active_artifact_name
+    if active_artifact and not str(active_artifact.get("id", "")).startswith("media:"):
+        active_artifact_id = str(active_artifact.get("id"))
+        active_artifact_name = str(active_artifact.get("name"))
     response = ChatResponse(
         session_id=result["session_id"],
         answer=result["answer"],
@@ -318,6 +352,7 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
         unverified_extension=result.get("unverified_extension"),
         evidence_status=gate["evidence_status"],
         reason_codes=gate["reason_codes"],
+        media_status=media_status,
     )
     await memory.remember_exchange(
         session_id=request.session_id,
@@ -333,6 +368,9 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
             "rewrite_subject": rewrite.subject,
             "retrieval_mode": retrieval.get("mode"),
             "retrieval_trace": retrieval.get("retrieval_trace", {}),
+            "active_artifact_id": active_artifact_id,
+            "active_artifact_name": active_artifact_name,
+            "query_plan": query_plan.as_dict(),
         },
     )
     return response

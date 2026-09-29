@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.query_planner import has_media_request
+
 CATALOG_FIELD_WORDS = (
     "年代",
     "时代",
@@ -30,7 +32,6 @@ BACKGROUND_WORDS = (
     "交流",
     "交融",
 )
-MEDIA_WORDS = ("图片", "照片", "视频", "音频", "语音", "播放", "听听")
 
 
 def _compact(value: str) -> str:
@@ -49,15 +50,28 @@ def evidence_gate(query: str, retrieval: dict[str, Any]) -> dict[str, Any]:
     artifacts = retrieval.get("artifacts", [])
     citations = retrieval.get("citations", [])
     media = retrieval.get("media", [])
-    is_media = any(word in query for word in MEDIA_WORDS)
+    media_request = retrieval.get("media_request") or {}
+    is_media = bool(media_request.get("required")) or has_media_request(query)
     is_catalog_field = any(word in query for word in CATALOG_FIELD_WORDS)
     is_background = any(word in query for word in BACKGROUND_WORDS)
 
     if is_media:
         if media and retrieval.get("media_review_status") in {"approved", "legacy_verified"}:
+            mixed_media_description = "artifact_description" in (retrieval.get("query_tasks") or [])
             return {
                 "evidence_status": "sufficient",
-                "reason_codes": ["verified_media_link", "minio_object_present"],
+                "reason_codes": [
+                    "verified_media_link",
+                    "minio_object_present",
+                    *(["catalog_description_available"] if mixed_media_description else []),
+                ],
+                **({"citation_scope": "catalog_only"} if mixed_media_description and retrieval.get("catalog_citations") else {}),
+            }
+        if media_request.get("required") and "artifact_description" in (retrieval.get("query_tasks") or []) and retrieval.get("catalog_citations"):
+            return {
+                "evidence_status": "sufficient",
+                "reason_codes": ["media_not_found", "p1_catalog_record"],
+                "citation_scope": "catalog_only",
             }
         if media:
             return {

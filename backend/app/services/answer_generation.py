@@ -11,6 +11,7 @@ from app.core.config import Settings, settings
 from app.services.citation_validator import CitationValidator
 from app.services.model_clients import create_chat_client
 from app.services.model_readiness import get_model_readiness
+from app.services.model_runtime import chat_generation_runtime
 from app.services.query_rewriter import format_conversation_context
 
 
@@ -90,6 +91,7 @@ async def generate_grounded_answer(
     original_query: str | None = None,
     conversation_context: list[dict[str, Any]] | None = None,
     conversation_summary: str | None = None,
+    query_plan: dict[str, Any] | None = None,
     config: Settings = settings,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Generate only when enabled; invalid output is discarded as a whole."""
@@ -99,6 +101,11 @@ async def generate_grounded_answer(
     sources, allowed = build_evidence_pack(retrieval)
     if not sources:
         return None, "no_allowed_internal_sources"
+    if not chat_generation_runtime.allow(
+        threshold=config.chat_failure_threshold,
+        cooldown_seconds=config.chat_circuit_cooldown_seconds,
+    ):
+        return None, "chat_generation_circuit_open"
     has_internal_source = any(source.get("source_type") == "internal" for source in sources)
     has_external_source = any(source.get("source_type") == "external" for source in sources)
     has_catalog_source = any(
@@ -161,6 +168,12 @@ async def generate_grounded_answer(
     )
     if conversation_summary:
         context_block += f"\nCONVERSATION_SUMMARY（仅供消解上下文，不是事实证据）：\n{conversation_summary[:2000]}"
+    plan_block = (
+        "QUERY_PLAN（只用于组织回答，不是事实证据）：\n"
+        f"{query_plan}\n"
+        if query_plan
+        else ""
+    )
     prompt = (
         "你是面向普通游客的博物馆讲解员。只能依据给定证据写 internal_answer，"
         "不得新增、修改或猜测馆藏事实。可选 unverified_extension 只能写通用历史常识，"
@@ -175,6 +188,7 @@ async def generate_grounded_answer(
         "整段控制在三段以内，避免重复同一结论。"
         f"{catalog_instruction}{catalog_only_text}{relation_instruction}{external_instruction}\n\n"
         f"{context_block}\n\n"
+        f"{plan_block}\n"
         f"ORIGINAL_USER_QUERY:\n{original_query or query}\n\n"
         f"RETRIEVAL_QUERY:\n{query}\n\nINTERNAL_EVIDENCE:\n{sources}"
     )
@@ -187,7 +201,13 @@ async def generate_grounded_answer(
             else GeneratedAnswer.model_validate(result).model_dump()
         )
     except Exception as error:  # noqa: BLE001 -- provider errors must transparently degrade.
+        chat_generation_runtime.record_failure(
+            type(error).__name__,
+            threshold=config.chat_failure_threshold,
+            cooldown_seconds=config.chat_circuit_cooldown_seconds,
+        )
         return None, f"chat_generation_error:{type(error).__name__}"
+    chat_generation_runtime.record_success()
     generated["internal_answer"] = clean_user_facing_text(generated.get("internal_answer")) or ""
     generated["unverified_extension"] = clean_user_facing_text(generated.get("unverified_extension"))
     if relation_question:
