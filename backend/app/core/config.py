@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     admin_api_token: str | None = None
     # Used to sign visitor access tokens. Set a long random value in .env.
     auth_secret: str = "change_me_auth_secret"
+    # Public visitor mode is useful for kiosk/demo deployments. Set to true
+    # when every chat/history request must carry a valid visitor token.
+    auth_required: bool = False
     llm_api_key: str | None = None
     llm_base_url: str | None = None
     chat_model: str | None = None

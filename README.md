@@ -13,6 +13,8 @@
 
 当前默认 **不调用任何真实模型 API**。系统处于 `keyword_rag` 模式；模型、向量检索、RRF 和真实 reranker 的接入条件见 [模型接入准备](docs/MODEL_SETUP.md)。
 
+当前访客认证默认关闭（`AUTH_REQUIRED=false`、`VITE_AUTH_REQUIRED=false`），打开网页即可使用对话和馆藏导览。需要恢复登录校验时，将根目录 `.env` 的 `AUTH_REQUIRED` 改为 `true`，并在 `frontend/.env` 设置 `VITE_AUTH_REQUIRED=true`（Docker 部署则设置同名构建变量），然后重启后端并重新构建/启动前端。
+
 ## 快速开始（本机开发）
 
 ```powershell
@@ -52,6 +54,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-system.p
 - [检索链路](docs/RETRIEVAL.md) 与 [检索评测](docs/EVALUATION.md)；
 - [对话记忆](docs/CONVERSATION_MEMORY.md)；
 - [部署说明](docs/DEPLOYMENT.md)。
+
+生产环境和离线部署文件全部位于 `deploy/`；进入该目录后填写 `.env`，运行 `offline-deploy.sh`（Windows 使用 `offline-deploy.ps1`）即可启动。详细步骤见 [生产环境镜像一键部署](docs/DEPLOYMENT.md#生产环境镜像一键部署)。
 
 ## 安全约束
 

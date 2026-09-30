@@ -20,6 +20,13 @@ backend/.env
 frontend/.env
 
 # Local data and generated artifacts
+volumes/
+deploy-data/
+enshi-museum-images-*.tar
+release/
+deploy/volumes/
+deploy/data/
+deploy/release/
 outputs/
 data/raw/*
 !data/raw/.gitkeep

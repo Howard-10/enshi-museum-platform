@@ -7,11 +7,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "${POSTGRES_PORT}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./volumes/postgres:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -22,10 +20,8 @@ services:
     image: redis:7-alpine
     container_name: enshi-redis
     restart: unless-stopped
-    ports:
-      - "${REDIS_PORT}:6379"
     volumes:
-      - redis_data:/data
+      - ./volumes/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -34,8 +30,6 @@ services:
 
   minio:
     image: quay.io/minio/minio:latest
-    # Kept distinct from the legacy `enshi-minio` container so old local
-    # object data stays untouched during the rebuild.
     container_name: enshi-museum-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -43,28 +37,25 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     ports:
-      - "${MINIO_API_PORT}:9000"
-      - "${MINIO_CONSOLE_PORT}:9001"
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - ./volumes/minio:/data
 
   backend:
-    build:
-      context: ./backend
-    profiles: ["app"]
+    image: ${BACKEND_IMAGE:-enshi-museum/backend:1.0.0}
+    container_name: enshi-museum-backend
     restart: unless-stopped
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: minio:9000
-      MINIO_PUBLIC_ENDPOINT: localhost:${MINIO_API_PORT}
-      FRONTEND_ORIGIN: http://localhost:${FRONTEND_PORT}
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
     volumes:
       - ./data:/data:ro
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
-    ports:
-      - "${BACKEND_PORT}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,15 +70,11 @@ services:
       retries: 12
 
   frontend:
-    build:
-      context: ./frontend
-      args:
-        VITE_API_BASE_URL: /api/v1
-        VITE_AUTH_REQUIRED: ${VITE_AUTH_REQUIRED:-false}
-    profiles: ["app"]
+    image: ${FRONTEND_IMAGE:-enshi-museum/frontend:1.0.0}
+    container_name: enshi-museum-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT}:80"
+      - "${FRONTEND_PORT:-80}:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -96,7 +83,3 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-
-volumes:
-  postgres_data:
-  redis_data:

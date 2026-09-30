@@ -50,7 +50,7 @@ class ConversationMemoryService:
         self,
         *,
         session_id: str,
-        user_id: UUID,
+        user_id: UUID | None,
         user_content: str,
         assistant_content: str,
         citations: list[dict[str, Any]],
@@ -85,7 +85,7 @@ class ConversationMemoryService:
         await self.session.refresh(assistant_message)
         await self._cache_recent(session_id, await self._load_database_recent(session_id, user_id))
 
-    async def recent_messages(self, session_id: str, user_id: UUID) -> tuple[str, list[dict[str, Any]]]:
+    async def recent_messages(self, session_id: str, user_id: UUID | None) -> tuple[str, list[dict[str, Any]]]:
         conversation = await self._conversation_for_user(session_id, user_id)
         if conversation is None:
             return "postgresql", []
@@ -96,21 +96,21 @@ class ConversationMemoryService:
         await self._cache_recent(session_id, messages)
         return "postgresql", messages
 
-    async def ensure_owner(self, session_id: str, user_id: UUID) -> None:
+    async def ensure_owner(self, session_id: str, user_id: UUID | None) -> None:
         await self._get_or_create_conversation(session_id, user_id)
 
-    async def _conversation_for_user(self, session_id: str, user_id: UUID) -> Conversation | None:
+    async def _conversation_for_user(self, session_id: str, user_id: UUID | None) -> Conversation | None:
         conversation = await self.session.scalar(
             select(Conversation).where(Conversation.session_key == session_id)
         )
-        if conversation is not None and conversation.user_id not in (None, user_id):
+        if user_id is not None and conversation is not None and conversation.user_id not in (None, user_id):
             raise ConversationOwnershipError
-        if conversation is not None and conversation.user_id is None:
+        if user_id is not None and conversation is not None and conversation.user_id is None:
             conversation.user_id = user_id
             await self.session.flush()
         return conversation
 
-    async def _get_or_create_conversation(self, session_id: str, user_id: UUID) -> Conversation:
+    async def _get_or_create_conversation(self, session_id: str, user_id: UUID | None) -> Conversation:
         conversation = await self._conversation_for_user(session_id, user_id)
         if conversation is None:
             conversation = Conversation(session_key=session_id, user_id=user_id)
@@ -118,7 +118,7 @@ class ConversationMemoryService:
             await self.session.flush()
         return conversation
 
-    async def _load_database_recent(self, session_id: str, user_id: UUID) -> list[dict[str, Any]]:
+    async def _load_database_recent(self, session_id: str, user_id: UUID | None) -> list[dict[str, Any]]:
         conversation = await self._conversation_for_user(session_id, user_id)
         if conversation is None:
             return []

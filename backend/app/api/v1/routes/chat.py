@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import OptionalCurrentUser
 from app.core.config import settings
 from app.db.session import get_db_session
 from app.graphs.chat_graph import OUT_OF_SCOPE_REQUEST_WORDS, _primary_artifact, chat_graph
@@ -51,19 +51,19 @@ def _deduplicate_citations(citations: list[dict]) -> list[dict]:
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUser) -> ChatResponse:
+async def chat(request: ChatRequest, session: DbSession, current_user: OptionalCurrentUser) -> ChatResponse:
     """Run intent detection, evidence retrieval, and answer composition."""
 
     memory = ConversationMemoryService(session)
+    owner_id = current_user.id if current_user is not None else None
     try:
-        await memory.ensure_owner(request.session_id, current_user.id)
+        await memory.ensure_owner(request.session_id, owner_id)
     except ConversationOwnershipError as error:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能访问其他用户的对话。") from error
 
-    # History is scoped to the authenticated owner.  Passing the user id is
-    # required both for the ownership check and for the PostgreSQL fallback;
-    # omitting it makes every first chat request fail before retrieval starts.
-    _, recent_history = await memory.recent_messages(request.session_id, current_user.id)
+    # Authenticated requests remain user-scoped. In public kiosk mode owner_id
+    # is None, so the browser-generated session key is the conversation scope.
+    _, recent_history = await memory.recent_messages(request.session_id, owner_id)
     rewrite_context = recent_history[-6:]
     conversation_context = recent_history[-10:]
     rewrite = rewrite_query(request.message, rewrite_context)
@@ -356,7 +356,7 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
     )
     await memory.remember_exchange(
         session_id=request.session_id,
-        user_id=current_user.id,
+        user_id=owner_id,
         user_content=request.message,
         assistant_content=response.answer,
         citations=[citation.model_dump() for citation in response.citations],
@@ -377,12 +377,12 @@ async def chat(request: ChatRequest, session: DbSession, current_user: CurrentUs
 
 
 @router.get("/{session_id}/history", response_model=ConversationHistoryResponse)
-async def get_history(session_id: str, session: DbSession, current_user: CurrentUser) -> ConversationHistoryResponse:
+async def get_history(session_id: str, session: DbSession, current_user: OptionalCurrentUser) -> ConversationHistoryResponse:
     """Return recent messages from Redis when warm, otherwise PostgreSQL."""
 
     try:
         source, messages = await ConversationMemoryService(session).recent_messages(
-            session_id, current_user.id
+            session_id, current_user.id if current_user is not None else None
         )
     except ConversationOwnershipError as error:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能访问其他用户的对话。") from error
